@@ -100,7 +100,7 @@ class FeedForward(nn.Module):
         return self.fc2(F.relu(self.fc1(x), inplace=True))
 
 
-def PositionalEncoding(dim, pos_len):
+def PositionalEncoding(pos_len,dim):
     def positional(pos, i):
         p=torch.tensor(pos/10000**((i//2)/dim))
         if i & 1 == 1:
@@ -125,7 +125,7 @@ class Encoder(nn.Module):
 
     def forward(self, words: torch.LongTensor):
         encode = self.embed(words)
-        encode += PositionalEncoding(self.dim, words.size(1))
+        encode += PositionalEncoding(words.size(1),self.dim)
         # recycle n times
         # if self.recycle>0:
         #     for _ in range(self.recycle):
@@ -149,7 +149,7 @@ class Decoder(nn.Module):
 
     def forward(self, words: torch.LongTensor):
         decode = self.embed(words)
-        decode += PositionalEncoding(self.dim, words.shape[0])
+        decode += PositionalEncoding(words.size(1),self.dim)
         decode = self.MHA(decode, decode, decode)  # self-attention
 
         return decode

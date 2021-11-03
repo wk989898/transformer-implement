@@ -1,4 +1,4 @@
-from transformer import MultiHeadAttention,Transformer
+from transformer import MultiHeadAttention,Transformer,PositionalEncoding
 import torch
 
 dim=64
@@ -20,3 +20,7 @@ model=Transformer(vocab_dim, dim,atten_dim)
 pred=model(inputs,outputs)
 assert pred.shape==torch.Size((1,vocab_dim,1)),'assert size'
 # print(pred)
+
+res=PositionalEncoding(vocab_dim,dim)
+assert res.shape==torch.Size([vocab_dim,dim]),'positional'
+# print(res)
