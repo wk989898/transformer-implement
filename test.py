@@ -16,8 +16,10 @@ assert out.shape==torch.Size(input_size),'same size'
 
 inputs=torch.arange(0,vocab_dim).unsqueeze(0).long()
 outputs=torch.arange(0,vocab_dim).unsqueeze(0).long()
+input_mask=torch.zeros((vocab_dim))
+output_mask=torch.zeros((vocab_dim))
 model=Transformer(vocab_dim, dim,atten_dim)
-pred=model(inputs,outputs)
+pred=model(inputs,outputs,input_mask,output_mask)
 assert pred.shape==torch.Size((1,vocab_dim,1)),'assert size'
 # print(pred)
 
