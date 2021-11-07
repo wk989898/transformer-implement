@@ -1,3 +1,4 @@
+from operator import le
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,10 +10,10 @@ class Transformer(nn.Module):
         super().__init__()
         self.encoder = Encoder(vocab_dim, dim, atten_dim, recycle=recycle)
         self.decoder = Decoder(vocab_dim, dim, atten_dim, recycle=recycle)
-        #
         self.fc = nn.Linear(dim, vocab_dim)
 
-        self.criterion = nn.CrossEntropyLoss(reduction='sum')
+        # Specifies a target value that is ignored and does not contribute to the input gradient.
+        self.criterion = nn.CrossEntropyLoss(reduction='sum',ignore_index=0)
         self.vocab_dim=vocab_dim
 
     def forward(self, inputs, outputs, input_mask=None, output_mask=None):
@@ -22,27 +23,25 @@ class Transformer(nn.Module):
         out = torch.softmax(self.fc(decode), dim=-1)
         return out
 
-    def compute_loss(self, pred, label: torch.Tensor, smoothing=False):
+    def compute_loss(self, pred:torch.Tensor, label: torch.Tensor, smoothing=False):
         non_pad_mask = label.ne(0)
-
-        gt = label.view(-1)
-        p = torch.argmax(pred.view(-1, pred.size(-1)), dim=-
-                         1).masked_fill_(~non_pad_mask.view(-1), -1).detach()
+        
+        p = torch.argmax(pred.view(-1, pred.size(-1)), dim=-1)
+        gt=label
         assert p.shape == gt.shape
-        acc=torch.eq(p, gt).sum()
+        acc = p.eq(label).masked_select(non_pad_mask).sum().item()
 
-
-        label = F.one_hot(label, num_classes=self.vocab_dim)
         if smoothing:
+            label = F.one_hot(label, num_classes=self.vocab_dim)
             eps=0.1
             label = label * (1 - eps) + (1 - label) * eps / (self.vocab_dim - 1)
-        log_prb = F.log_softmax(pred, dim=1)
-        loss = -(label * log_prb).sum(dim=-1)
-        loss = loss.masked_select(non_pad_mask).sum()
-        # error! batch pad not same
-        # pred = pred.view(-1, pred.size(-1))
-        # label = label.view(-1)
-        # loss = self.criterion(pred, label)
+            log_prb = F.log_softmax(pred, dim=1)
+            loss = -(label * log_prb).sum(dim=-1)
+            loss = loss.masked_select(non_pad_mask).sum()
+        else:
+            pred = pred.view(-1, pred.size(-1))
+            label = label.view(-1)
+            loss = self.criterion(pred, label)
 
         return loss, acc
 
