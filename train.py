@@ -168,7 +168,7 @@ if __name__ == '__main__':
     parse.add_argument('--atten_dim', type=int, default=64)
     parse.add_argument('--epoch', type=int, default=1000)
     parse.add_argument('--warm_step', type=int, default=4000)
-    parse.add_argument('--max_len', type=int, default=50)
+    parse.add_argument('--max_len', type=int, default=40)
     parse.add_argument('--batch_size', type=int, default=256)
     parse.add_argument('--seed', type=int)
     parse.add_argument('--save_path', type=str,

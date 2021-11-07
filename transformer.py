@@ -28,7 +28,7 @@ class Transformer(nn.Module):
 
         gt = label.view(-1)
         p = torch.argmax(pred.view(-1, pred.size(-1)), dim=-
-                         1).masked_fill_(non_pad_mask.view(-1), -1).detach()
+                         1).masked_fill_(~non_pad_mask.view(-1), -1).detach()
         assert p.shape == gt.shape
         acc = (p == gt).sum()
 
