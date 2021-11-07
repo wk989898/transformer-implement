@@ -132,7 +132,7 @@ def main(args):
 
             total_loss += loss.item()
             total_acc += acc
-            total_n += en_mask.nonzero().sum()+1
+            total_n += label.nonzero().sum()
         print(
             f'iter:{iter} loss:{total_loss/total_n:.2f} acc:{total_acc/total_n:.2f}')
 
@@ -149,14 +149,13 @@ def main(args):
                 device).detach(), torch.tensor(en_mask).to(device).detach()
             label = en.clone().detach()
             pred = model(cs, en, cs_mask, en_mask)
-
             non_pad_mask = label.ne(0)
-            p = torch.argmax(pred.view(-1, pred.size(-1)),
-                            dim=-1).masked_fill_(non_pad_mask.view(-1), -1)
-            assert p.shape == label.shape
-            acc=torch.eq(p, label.view(-1)).sum()
+            p = torch.argmax(pred, dim=-1)
+            gt=label
+            assert p.shape == gt.shape,f'pred shape:{p.shape} and gt shape:{gt.shape}'
+            acc = p.eq(label).masked_select(non_pad_mask).sum().item()
             
-            total_n += en_mask.nonzero().sum()+1
+            total_n += label.nonzero().sum()
             total_acc += acc
     print(f'acc:{total_acc/total_n:.2f}')
 
