@@ -1,58 +1,47 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange,repeat
+from einops import rearrange, repeat
 
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_dim, dim, atten_dim,recycle=-1):
+    def __init__(self, vocab_dim, dim, atten_dim, recycle=1):
         super().__init__()
-        self.dim = dim
-        self.vocab_dim = vocab_dim
-        self.recycle = recycle
-
-        self.encoder = Encoder(vocab_dim, dim, atten_dim,recycle=recycle)
-        self.decoder = Decoder(vocab_dim, dim, atten_dim)
-        self.MHA = MultiHeadAttention(dim, atten_dim)
+        self.encoder = Encoder(vocab_dim, dim, atten_dim, recycle=recycle)
+        self.decoder = Decoder(vocab_dim, dim, atten_dim, recycle=recycle)
         #
-        self.fc = nn.Linear(dim, 1)
-        
-        self.criterion=nn.CrossEntropyLoss()
-    def forward(self, inputs, outputs,input_mask=None,output_mask=None):
-        encode = self.encoder(inputs,input_mask)
-        # recycle
-        if self.recycle>0:
-            decode=outputs
-            for _ in range(self.recycle):
-                decode = self.decoder(decode)
-                out = self.MHA(encode, encode, decode)
-        decode = self.decoder(outputs, output_mask)
+        self.fc = nn.Linear(dim, vocab_dim)
 
-        out = self.MHA(encode, encode, decode,output_mask)
+        self.criterion = nn.CrossEntropyLoss(reduction='sum')
+        self.vocab_dim=vocab_dim
 
-        #
-        out = torch.softmax(self.fc(out), dim=-1)
+    def forward(self, inputs, outputs, input_mask=None, output_mask=None):
+        encode = self.encoder(inputs, input_mask)
+        decode = self.decoder(encode, outputs, input_mask, output_mask)
+
+        out = torch.softmax(self.fc(decode), dim=-1)
         return out
 
-    def compute_loss(self, pred, label: torch.Tensor, en_mask:torch.Tensor,smoothing=True):
-        non_pad_mask = label.ne(0) 
-        words=en_mask.nonzero().sum()+1
+    def compute_loss(self, pred, label: torch.Tensor, en_mask: torch.Tensor, eps=0.1):
+        non_pad_mask = label.ne(0)
+        words = en_mask.nonzero().sum()+1
 
-        gt=label.view(-1)
-        p=torch.argmax(pred.view(-1, pred.size(-1)), dim=-1).masked_fill_(non_pad_mask.view(-1),-1)
-        acc = (p== gt).sum()
-        if smoothing:
-            eps = 0.1
-            label = F.one_hot(label, num_classes=self.vocab_dim)
-            label = label * (1 - eps) + (1 - label) * eps / (self.vocab_dim - 1)
-            log_prb = F.log_softmax(pred, dim=1)
-            loss = -(label * log_prb).sum(dim=-1)
-            loss = loss.masked_select(non_pad_mask).sum()
-            # error! batch pad not same
-            # pred = pred.view(-1, pred.size(-1))
-            # label = label.view(-1)
-            # loss = self.criterion(pred, label)
-        
+        gt = label.view(-1)
+        p = torch.argmax(pred.view(-1, pred.size(-1)), dim=-
+                         1).masked_fill_(non_pad_mask.view(-1), -1).detach()
+        assert p.shape == gt.shape
+        acc = (p == gt).sum()
+
+        label = F.one_hot(label, num_classes=self.vocab_dim)
+        label = label * (1 - eps) + (1 - label) * eps / (self.vocab_dim - 1)
+        log_prb = F.log_softmax(pred, dim=1)
+        loss = -(label * log_prb).sum(dim=-1)
+        loss = loss.masked_select(non_pad_mask).sum()
+        # error! batch pad not same
+        # pred = pred.view(-1, pred.size(-1))
+        # label = label.view(-1)
+        # loss = self.criterion(pred, label)
+
         return loss, acc, words
 
 
@@ -86,7 +75,7 @@ class MultiHeadAttention(nn.Module):
         self.fc = nn.Linear(head*atten_dim, dim)
         self.norm = nn.LayerNorm(dim)
 
-        self.drop = nn.Dropout(0.1, inplace=True)
+        self.drop = nn.Dropout(0.1)
 
     def forward(self, q, k, v, mask=None):
         '''
@@ -99,13 +88,11 @@ class MultiHeadAttention(nn.Module):
         Q = rearrange(Q, 'm l (n d) -> m n l d', n=self.head)
         K = rearrange(K, 'm l (n d) -> m n l d', n=self.head)
         V = rearrange(V, 'm l (n d) -> m n l d', n=self.head)
-        # if mask is not None:
-        #     mask=rearrange(mask,'v -> () () () v')
         atten = self.atten(Q, K, V, mask)
         atten = rearrange(atten, 'm n l d -> m l (d n)')
         atten = self.fc(atten)
 
-        # self.drop(atten)
+        atten=self.drop(atten)
         atten += q
         atten = self.norm(atten)
         return atten
@@ -117,13 +104,16 @@ class FeedForward(nn.Module):
         self.dim = dim
         self.fc1 = nn.Linear(dim, hide_dim)
         self.fc2 = nn.Linear(hide_dim, dim)
+        self.norm=nn.LayerNorm(dim)
 
     def forward(self, x):
-        return self.fc2(F.relu(self.fc1(x), inplace=True))
+        out=self.fc2(F.relu(self.fc1(x)))
+        out+=x
+        return self.norm(out)
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, dim, pos_len=150):
+    def __init__(self, dim, pos_len=100):
         super().__init__()
 
         def positional(pos, i):
@@ -141,40 +131,42 @@ class PositionalEncoding(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, vocab_dim, dim, atten_dim,recycle=-1):
+    def __init__(self, vocab_dim, dim, atten_dim, recycle=1):
         super().__init__()
         self.embed = nn.Embedding(vocab_dim, dim)
         self.MHA = MultiHeadAttention(dim, atten_dim)
-        self.dim = dim
-        self.recycle=recycle
+        self.PE = PositionalEncoding(dim)
+        self.ff = FeedForward(dim)
+        self.recycle = recycle
 
-    def forward(self, words: torch.LongTensor,mask=None):
+    def forward(self, words: torch.LongTensor, mask=None):
         encode = self.embed(words)
-        encode += PositionalEncoding(words.size(1),self.dim)
+        encode += self.PE(encode)
         # recycle n times
-        if self.recycle>0:
-            for _ in range(self.recycle):
-                encode = self.MHA(encode, encode, encode)  # self-attention
-
-        encode = self.MHA(encode, encode, encode,mask)  # self-attention
+        for _ in range(self.recycle):
+            encode = self.MHA(encode, encode, encode, mask)  # self-attention
+            encode = self.ff(encode)
 
         return encode
 
 
 class Decoder(nn.Module):
-    '''
-    same as encoder，but no recycling
-    '''
 
-    def __init__(self, vocab_dim, dim, atten_dim):
+    def __init__(self, vocab_dim, dim, atten_dim, recycle=1):
         super().__init__()
         self.embed = nn.Embedding(vocab_dim, dim)
         self.MHA = MultiHeadAttention(dim, atten_dim)
-        self.dim = dim
+        self.PE = PositionalEncoding(dim)
+        self.ff = FeedForward(dim)
+        self.recycle = recycle
 
-    def forward(self, words: torch.LongTensor,mask=None):
+    def forward(self, encode, words: torch.LongTensor, input_mask, mask=None):
         decode = self.embed(words)
-        decode += PositionalEncoding(words.size(1),self.dim)
-        decode = self.MHA(decode, decode, decode,mask)  # self-attention
+        decode += self.PE(decode)
+        # recycle n times
+        for _ in range(self.recycle):
+            decode = self.MHA(decode, decode, decode, mask)  # self-attention
+            decode = self.MHA(decode, encode, encode, input_mask)
+            decode = self.ff(decode)
 
         return decode
