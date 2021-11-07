@@ -8,7 +8,8 @@ class Transformer(nn.Module):
     def __init__(self, vocab_dim, dim, atten_dim,recycle=-1):
         super().__init__()
         self.dim = dim
-        self.recycle=recycle
+        self.vocab_dim = vocab_dim
+        self.recycle = recycle
 
         self.encoder = Encoder(vocab_dim, dim, atten_dim,recycle=recycle)
         self.decoder = Decoder(vocab_dim, dim, atten_dim)
@@ -20,12 +21,12 @@ class Transformer(nn.Module):
     def forward(self, inputs, outputs,input_mask=None,output_mask=None):
         encode = self.encoder(inputs,input_mask)
         # recycle
-        # if self.recycle>0:
-        #     decode=outputs
-        #     for _ in range(self.recycle):
-        #         decode = self.decoder(decode)
-        #         out = self.MHA(encode, encode, decode)
-        decode = self.decoder(outputs,output_mask)
+        if self.recycle>0:
+            decode=outputs
+            for _ in range(self.recycle):
+                decode = self.decoder(decode)
+                out = self.MHA(encode, encode, decode)
+        decode = self.decoder(outputs, output_mask)
 
         out = self.MHA(encode, encode, decode,output_mask)
 
@@ -33,9 +34,26 @@ class Transformer(nn.Module):
         out = torch.softmax(self.fc(out), dim=-1)
         return out
 
-    def loss(self,pred,label):
-        diff=self.criterion(pred,label)
-        return diff
+    def compute_loss(self, pred, label: torch.Tensor, en_mask:torch.Tensor,smoothing=True):
+        non_pad_mask = label.ne(0) 
+        words=en_mask.nonzero().sum()+1
+
+        gt=label.view(-1)
+        p=torch.argmax(pred.view(-1, pred.size(-1)), dim=-1).masked_fill_(non_pad_mask.view(-1),-1)
+        acc = (p== gt).sum()
+        if smoothing:
+            eps = 0.1
+            label = F.one_hot(label, num_classes=self.vocab_dim)
+            label = label * (1 - eps) + (1 - label) * eps / (self.vocab_dim - 1)
+            log_prb = F.log_softmax(pred, dim=1)
+            loss = -(label * log_prb).sum(dim=-1)
+            loss = loss.masked_select(non_pad_mask).sum()
+            # error! batch pad not same
+            # pred = pred.view(-1, pred.size(-1))
+            # label = label.view(-1)
+            # loss = self.criterion(pred, label)
+        
+        return loss, acc, words
 
 
 class Attention(nn.Module):
@@ -50,7 +68,8 @@ class Attention(nn.Module):
         '''
         attn = torch.matmul(q/self.tem, k.transpose(3, 2))
         if mask is not None:
-            assert mask.shape[-1] == attn.shape[-1],'masked_fill same size'
+            mask = rearrange(mask, 'm l -> m () () l')
+            assert mask.shape[-1] == attn.shape[-1], f'masked_fill same size mask:{mask.shape} attention:{attn.shape}'
             attn.masked_fill_(mask == 0, -1e9)
         attn = torch.softmax(attn, -1)
         return torch.matmul(attn, v)
@@ -103,19 +122,22 @@ class FeedForward(nn.Module):
         return self.fc2(F.relu(self.fc1(x), inplace=True))
 
 
-def PositionalEncoding(pos_len,dim):
-    def positional(pos, i):
-        p=torch.tensor(pos/10000**((i//2)/dim))
-        if i & 1 == 1:
-            return torch.cos(p)
-        else:
-            return torch.sin(p)
+class PositionalEncoding(nn.Module):
+    def __init__(self, dim, pos_len=150):
+        super().__init__()
 
-    PE = torch.zeros((pos_len,dim))
-    for pos in range(pos_len):
-        for i in range(dim):
-            PE[pos][i] = positional(pos, i)
-    return PE
+        def positional(pos, i):
+            return pos/10000**((i//2)/dim)
+
+        PE = [[positional(pos, i) for i in range(dim)]
+              for pos in range(pos_len)]
+        PE = torch.tensor([PE])
+        PE[..., ::2] = torch.sin(PE[..., ::2])
+        PE[..., 1::2] = torch.cos(PE[..., 1::2])
+        self.register_buffer('PE', PE)
+
+    def forward(self, x):
+        return self.PE[:, :x.size(1)].clone().detach()
 
 
 class Encoder(nn.Module):
@@ -130,9 +152,9 @@ class Encoder(nn.Module):
         encode = self.embed(words)
         encode += PositionalEncoding(words.size(1),self.dim)
         # recycle n times
-        # if self.recycle>0:
-        #     for _ in range(self.recycle):
-        #         encode = self.MHA(encode, encode, encode)  # self-attention
+        if self.recycle>0:
+            for _ in range(self.recycle):
+                encode = self.MHA(encode, encode, encode)  # self-attention
 
         encode = self.MHA(encode, encode, encode,mask)  # self-attention
 

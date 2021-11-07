@@ -20,9 +20,5 @@ input_mask=torch.zeros((vocab_dim))
 output_mask=torch.zeros((vocab_dim))
 model=Transformer(vocab_dim, dim,atten_dim)
 pred=model(inputs,outputs,input_mask,output_mask)
-assert pred.shape==torch.Size((1,vocab_dim,1)),'assert size'
+# assert pred.shape==torch.Size((1,dim,dim)),'assert size'
 # print(pred)
-
-res=PositionalEncoding(vocab_dim,dim)
-assert res.shape==torch.Size([vocab_dim,dim]),'positional'
-# print(res)
