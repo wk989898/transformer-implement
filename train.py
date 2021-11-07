@@ -124,7 +124,7 @@ def main(args):
                 device).detach(), torch.tensor(en_mask).to(device).detach()
             label = en.clone().detach()
             pred = model(cs, en, cs_mask, en_mask)
-            loss, acc, n = model.compute_loss(pred, label, en_mask)
+            loss, acc = model.compute_loss(pred, label)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
@@ -132,7 +132,7 @@ def main(args):
 
             total_loss += loss.item()
             total_acc += acc
-            total_n += n
+            total_n += en_mask.nonzero().sum()+1
         print(
             f'iter:{iter} loss:{total_loss/total_n:.2f} acc:{total_acc/total_n:.2f}')
 
@@ -142,21 +142,22 @@ def main(args):
         validation, prefix='validation-', tokenizer=tokenizer)
 
     model.eval()
-    for cs, en, cs_mask, en_mask in tqdm(validation_data):
-        cs, en = torch.tensor(cs).to(device), torch.tensor(en).to(device)
-        cs_mask, en_mask = torch.tensor(cs_mask).to(
-            device).detach(), torch.tensor(en_mask).to(device).detach()
-        label = en.clone().detach()
-        pred = model(cs, en, cs_mask, en_mask)
+    with torch.no_grad():
+        for cs, en, cs_mask, en_mask in tqdm(validation_data):
+            cs, en = torch.tensor(cs).to(device), torch.tensor(en).to(device)
+            cs_mask, en_mask = torch.tensor(cs_mask).to(
+                device).detach(), torch.tensor(en_mask).to(device).detach()
+            label = en.clone().detach()
+            pred = model(cs, en, cs_mask, en_mask)
 
-        non_pad_mask = label.ne(0)
-        words = en_mask.nonzero().sum()+1
-        p = torch.argmax(pred.view(-1, pred.size(-1)),
-                         dim=-1).masked_fill_(non_pad_mask.view(-1), -1)
-        assert p.shape == label.shape
-        acc = (p == label.view(-1)).sum()
-        total_n += words
-        total_acc += acc
+            non_pad_mask = label.ne(0)
+            p = torch.argmax(pred.view(-1, pred.size(-1)),
+                            dim=-1).masked_fill_(non_pad_mask.view(-1), -1)
+            assert p.shape == label.shape
+            acc=torch.eq(p, label.view(-1)).sum()
+            
+            total_n += en_mask.nonzero().sum()+1
+            total_acc += acc
     print(f'acc:{total_acc/total_n:.2f}')
 
     torch.save(model, args.save_path)

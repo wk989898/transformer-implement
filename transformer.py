@@ -22,18 +22,20 @@ class Transformer(nn.Module):
         out = torch.softmax(self.fc(decode), dim=-1)
         return out
 
-    def compute_loss(self, pred, label: torch.Tensor, en_mask: torch.Tensor, eps=0.1):
+    def compute_loss(self, pred, label: torch.Tensor, smoothing=False):
         non_pad_mask = label.ne(0)
-        words = en_mask.nonzero().sum()+1
 
         gt = label.view(-1)
         p = torch.argmax(pred.view(-1, pred.size(-1)), dim=-
                          1).masked_fill_(~non_pad_mask.view(-1), -1).detach()
         assert p.shape == gt.shape
-        acc = (p == gt).sum()
+        acc=torch.eq(p, gt).sum()
+
 
         label = F.one_hot(label, num_classes=self.vocab_dim)
-        label = label * (1 - eps) + (1 - label) * eps / (self.vocab_dim - 1)
+        if smoothing:
+            eps=0.1
+            label = label * (1 - eps) + (1 - label) * eps / (self.vocab_dim - 1)
         log_prb = F.log_softmax(pred, dim=1)
         loss = -(label * log_prb).sum(dim=-1)
         loss = loss.masked_select(non_pad_mask).sum()
@@ -42,7 +44,7 @@ class Transformer(nn.Module):
         # label = label.view(-1)
         # loss = self.criterion(pred, label)
 
-        return loss, acc, words
+        return loss, acc
 
 
 class Attention(nn.Module):
