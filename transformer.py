@@ -25,10 +25,10 @@ class Transformer(nn.Module):
 
     def compute_loss(self, pred:torch.Tensor, label: torch.Tensor, smoothing=False):
         non_pad_mask = label.ne(0)
-        
-        p = torch.argmax(pred.view(-1, pred.size(-1)), dim=-1)
+
+        p = torch.argmax(pred, dim=-1)
         gt=label
-        assert p.shape == gt.shape
+        assert p.shape == gt.shape,f'pred shape:{p.shape} and gt shape:{gt.shape}'
         acc = p.eq(label).masked_select(non_pad_mask).sum().item()
 
         if smoothing:
