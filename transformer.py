@@ -1,9 +1,7 @@
-from operator import le
 import torch
-from torch._C import device
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange, repeat
+from einops import rearrange
 
 
 def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=False, vocab_dim=10000):
