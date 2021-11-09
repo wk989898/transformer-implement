@@ -26,7 +26,7 @@ def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=F
         pred = pred.view(-1, pred.size(-1))
         label = label.view(-1)
         # Specifies a target value that is ignored and does not contribute to the input gradient.
-        loss = F.cross_entropy(pred, label, ignore_index=pad_idx)
+        loss = F.cross_entropy(pred, label, ignore_index=pad_idx,reduction='sum')
 
     return loss, acc
 
