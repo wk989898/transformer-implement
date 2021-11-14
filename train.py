@@ -6,6 +6,7 @@ import os
 from tqdm import tqdm
 import argparse
 import random
+from functools import reduce
 
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
@@ -32,12 +33,15 @@ def batch_iterator(dataset):
 def preprocess(dataset, file='tokenizer.json', prefix='', tokenizer=None):
     if tokenizer is None:
         tokenizer = loadTokenzier(dataset, file, prefix=prefix)
-    dataset = map(lambda x: (tokenizer.encode(
-        x['cs']), tokenizer.encode(x['en'])), dataset)
-    dataset = filter(lambda x: 2 < len(
-        x[0].tokens) < args.max_len and 2 < len(x[1].tokens) < args.max_len, dataset)
 
-    return list(dataset), tokenizer
+    def reduce_fn(res, x):
+        cs, en = tokenizer.encode(x['cs']), tokenizer.encode(x['en'])
+        if 2 < len(cs.tokens) < args.max_len and 2 < len(en.tokens) < args.max_len:
+            res.append((cs, en))
+        return res
+    dataset = reduce(reduce_fn, dataset, [])
+
+    return dataset, tokenizer
 
 
 def loadTokenzier(dataset, file='tokenizer.json', prefix=''):
@@ -69,7 +73,7 @@ def loadTokenzier(dataset, file='tokenizer.json', prefix=''):
 
 def update_lr(optimizer, step, args):
     warm_step, dim = args.warm_step, args.dim
-    lr = (dim**(-0.5))*min(step**(-0.5), step*warm_step**(-1.5))
+    lr = dim**(-0.5)*min(step**(-0.5), step*warm_step**(-1.5))
     for group in optimizer.param_groups:
         group['lr'] = lr
 
@@ -94,15 +98,17 @@ def main(args):
     args.pad_idx = 0
 
     train_data = DataLoader(train_data, batch_size=args.batch_size,
-                            num_workers=8, collate_fn=collate_fn)
+                            num_workers=8, shuffle=True, collate_fn=collate_fn)
 
     model = Transformer(args.vocab_dim, args.dim,
                         args.atten_dim, pad_idx=args.pad_idx, recycle=7)
+
     device = 'cpu'
-    if torch.cuda.is_available():
-        os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2,3"
-        device = 'cuda'
-        model = torch.nn.DataParallel(model).to(device)
+    if torch.cuda.is_available() and args.gpu_list:
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''.join(
+            [i for i in args.gpu_list])
+        model = torch.nn.DataParallel(model).cuda()
+        device = torch.device('cuda:'+args.gpu_list[0])
     print(f'args:{args}')
 
     optimizer = torch.optim.Adam(
@@ -113,7 +119,7 @@ def main(args):
         total_loss = 0
         total_acc = 0
         total_n = 0
-        for cs, en in tqdm(train_data):
+        for cs, en in train_data:
             cs, en = torch.tensor(cs).to(device), torch.tensor(en).to(device)
             label = en[..., 1:].clone()
             en = en[..., :-1]
@@ -136,10 +142,11 @@ def main(args):
         'wmt16', 'cs-en', split="validation").to_dict()['translation']
     validation_data, _ = preprocess(
         validation, prefix='validation-', tokenizer=tokenizer)
-
+    validation_data = DataLoader(validation_data, batch_size=args.batch_size,
+                            num_workers=8, shuffle=True, collate_fn=collate_fn)
     model.eval()
     with torch.no_grad():
-        for cs, en in tqdm(validation_data):
+        for cs, en in validation_data:
             cs, en = torch.tensor(cs).to(device), torch.tensor(en).to(device)
             label = en[..., 1:].clone()
             en = en[..., :-1]
@@ -159,12 +166,14 @@ def main(args):
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
+    parse.add_argument('--epoch', type=int, default=1000)
+    parse.add_argument('--batch_size', type=int, default=512)
+    parse.add_argument('--max_len', type=int, default=40)
+    parse.add_argument('--warm_step', type=int, default=4000)
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
-    parse.add_argument('--epoch', type=int, default=1000)
-    parse.add_argument('--warm_step', type=int, default=4000)
-    parse.add_argument('--max_len', type=int, default=40)
-    parse.add_argument('--batch_size', type=int, default=512)
+
+    parse.add_argument('-g', '--gpu_list', nargs='+', type=str)
     parse.add_argument('--seed', type=int)
     parse.add_argument('--save_path', type=str,
                        default='model.pt', help='specify path to save model')
