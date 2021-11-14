@@ -72,8 +72,9 @@ def loadTokenzier(dataset, file='tokenizer.json', prefix=''):
     return tokenizer
 
 
-def update_lr(optimizer, step, args):
-    warm_step, dim = args.warm_step, args.dim
+def update_lr(optimizer, args):
+    args.step += 1
+    step, warm_step, dim = args.step, args.warm_step, args.dim
     lr = dim**(-0.5)*min(step**(-0.5), step*warm_step**(-1.5))
     for group in optimizer.param_groups:
         group['lr'] = lr
@@ -104,6 +105,9 @@ def main(args):
     model = Transformer(args.vocab_dim, args.dim,
                         args.atten_dim, pad_idx=args.pad_idx, recycle=7)
 
+    optimizer = torch.optim.Adam(
+        model.parameters(), betas=[0.9, 0.98], eps=1e-9)
+
     device = 'cpu'
     if torch.cuda.is_available() and args.gpu_list:
         os.environ['CUDA_VISIBLE_DEVICES'] = ''.join(
@@ -111,10 +115,8 @@ def main(args):
         model = torch.nn.DataParallel(model).cuda()
         device = torch.device('cuda:'+args.gpu_list[0])
     print(f'args:{args}')
-
-    optimizer = torch.optim.Adam(
-        model.parameters(), betas=[0.9, 0.98], eps=1e-9)
-
+    writer = SummaryWriter(args.log_dir)
+    args.step = 0
     model.train()
     for iter in range(args.epochs):
         total_loss = 0
@@ -130,7 +132,7 @@ def main(args):
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
-            update_lr(optimizer, iter+1, args)
+            update_lr(optimizer, args)
 
             total_loss += loss.item()
             total_acc += acc.item()
@@ -138,12 +140,9 @@ def main(args):
         lr = optimizer.param_groups[0]['lr']
         print(
             f'iter:{iter} loss:{total_loss/total_n} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
-        with SummaryWriter(args.log_dir) as writer:
-            writer.add_scalar('loss', total_loss/total_n,
-                              global_step=args.epochs)
-            writer.add_scalar('acc', total_acc/total_n,
-                              global_step=args.epochs)
-            writer.add_scalar('lr', lr, global_step=args.epochs)
+        writer.add_scalar('loss', total_loss/total_n, global_step=args.epochs)
+        writer.add_scalar('acc', total_acc/total_n, global_step=args.epochs)
+        writer.add_scalar('lr', lr, global_step=args.epochs)
 
     validation = load_dataset(
         'wmt16', 'cs-en', split="validation").to_dict()['translation']
@@ -168,6 +167,7 @@ def main(args):
             total_acc += acc.item()
     print(f'acc:{total_acc/total_n:.2f}')
 
+    writer.close()
     torch.save(model.state_dict(), args.save_path)
 
 
@@ -175,7 +175,7 @@ if __name__ == '__main__':
     parse = argparse.ArgumentParser()
     parse.add_argument('--epochs', type=int, default=1000)
     parse.add_argument('--batch_size', type=int, default=512)
-    parse.add_argument('--max_len', type=int, default=40)
+    parse.add_argument('--max_len', type=int, default=30)
     parse.add_argument('--warm_step', type=int, default=4000)
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
