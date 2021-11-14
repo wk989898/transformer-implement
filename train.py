@@ -7,6 +7,7 @@ from tqdm import tqdm
 import argparse
 import random
 from functools import reduce
+from torch.utils.tensorboard import SummaryWriter
 
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
@@ -115,7 +116,7 @@ def main(args):
         model.parameters(), betas=[0.9, 0.98], eps=1e-9)
 
     model.train()
-    for iter in range(args.epoch):
+    for iter in range(args.epochs):
         total_loss = 0
         total_acc = 0
         total_n = 0
@@ -137,13 +138,19 @@ def main(args):
         lr = optimizer.param_groups[0]['lr']
         print(
             f'iter:{iter} loss:{total_loss/total_n} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
+        with SummaryWriter(args.log_dir) as writer:
+            writer.add_scalar('loss', total_loss/total_n,
+                              global_step=args.epochs)
+            writer.add_scalar('acc', total_acc/total_n,
+                              global_step=args.epochs)
+            writer.add_scalar('lr', lr, global_step=args.epochs)
 
     validation = load_dataset(
         'wmt16', 'cs-en', split="validation").to_dict()['translation']
     validation_data, _ = preprocess(
         validation, prefix='validation-', tokenizer=tokenizer)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
-                            num_workers=8, shuffle=True, collate_fn=collate_fn)
+                                 num_workers=8, shuffle=True, collate_fn=collate_fn)
     model.eval()
     with torch.no_grad():
         for cs, en in validation_data:
@@ -175,6 +182,8 @@ if __name__ == '__main__':
 
     parse.add_argument('-g', '--gpu_list', nargs='+', type=str)
     parse.add_argument('--seed', type=int)
+    parse.add_argument('--log_dir', type=str,
+                       default='log', help='specify path to save log')
     parse.add_argument('--save_path', type=str,
                        default='model.pt', help='specify path to save model')
     args = parse.parse_args()

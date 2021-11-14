@@ -24,7 +24,8 @@ def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=F
         pred = pred.view(-1, pred.size(-1))
         label = label.view(-1)
         # Specifies a target value that is ignored and does not contribute to the input gradient.
-        loss = F.cross_entropy(pred, label, ignore_index=pad_idx,reduction='sum')
+        loss = F.cross_entropy(
+            pred, label, ignore_index=pad_idx, reduction='sum')
 
     return loss, acc
 
@@ -32,14 +33,14 @@ def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=F
 class Transformer(nn.Module):
     def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, recycle=1):
         super().__init__()
-        self.share_weight=nn.Parameter(nn.init.xavier_uniform_(torch.zeros(vocab_dim, dim)))
+        self.share_weight = nn.Parameter(
+            nn.init.xavier_uniform_(torch.zeros(vocab_dim, dim)))
         self.encoder = Encoder(vocab_dim, dim, atten_dim,
-                               pad_idx=pad_idx, recycle=recycle,share_weight=self.share_weight)
+                               pad_idx=pad_idx, recycle=recycle, share_weight=self.share_weight)
         self.decoder = Decoder(vocab_dim, dim, atten_dim,
-                               pad_idx=pad_idx, recycle=recycle,share_weight=self.share_weight)
+                               pad_idx=pad_idx, recycle=recycle, share_weight=self.share_weight)
         self.fc = nn.Linear(dim, vocab_dim)
-        self.fc.weight=self.share_weight
-
+        self.fc.weight = self.share_weight
 
         self.pad_idx = pad_idx
 
@@ -148,11 +149,11 @@ class PositionalEncoding(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, vocab_dim, dim, atten_dim, pad_idx, recycle=1,share_weight=None):
+    def __init__(self, vocab_dim, dim, atten_dim, pad_idx, recycle=1, share_weight=None):
         super().__init__()
         self.embed = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
         if share_weight is not None:
-            self.embed.weight=share_weight
+            self.embed.weight = share_weight
         self.MHA = MultiHeadAttention(dim, atten_dim, pad_idx=pad_idx)
         self.PE = PositionalEncoding(dim)
         self.ff = FeedForward(dim)
@@ -171,15 +172,16 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
 
-    def __init__(self, vocab_dim, dim, atten_dim, pad_idx, recycle=1,share_weight=None):
+    def __init__(self, vocab_dim, dim, atten_dim, pad_idx, recycle=1, share_weight=None):
         super().__init__()
         self.embed = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
         if share_weight is not None:
-            self.embed.weight=share_weight
+            self.embed.weight = share_weight
         self.MHA = MultiHeadAttention(dim, atten_dim, pad_idx=pad_idx)
         self.PE = PositionalEncoding(dim)
         self.ff = FeedForward(dim)
         self.recycle = recycle
+
     def forward(self, encode, words: torch.LongTensor, input_mask, mask=None):
         decode = self.embed(words)
         decode += self.PE(decode)
