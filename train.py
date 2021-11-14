@@ -173,7 +173,7 @@ def main(args):
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
-    parse.add_argument('--epoch', type=int, default=1000)
+    parse.add_argument('--epochs', type=int, default=1000)
     parse.add_argument('--batch_size', type=int, default=512)
     parse.add_argument('--max_len', type=int, default=40)
     parse.add_argument('--warm_step', type=int, default=4000)
