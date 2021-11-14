@@ -5,7 +5,7 @@ from einops import rearrange
 
 
 def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=False, vocab_dim=10000):
-    pred=pred.contiguous()
+    pred = pred.contiguous()
     non_pad_mask = label.ne(pad_idx)
 
     p = torch.argmax(pred, dim=-1)
@@ -49,7 +49,7 @@ class Transformer(nn.Module):
         out_len = outputs.shape[-1]
         input_mask = inputs.ne(self.pad_idx).unsqueeze(-2)
         output_mask = outputs.ne(self.pad_idx).unsqueeze(-2) & (
-            torch.tril(torch.ones((1, out_len, out_len).to(outputs.device)))).bool()
+            torch.tril(torch.ones((1, out_len, out_len), device=outputs.device))).bool()
         return input_mask, output_mask
 
     def forward(self, inputs: torch.Tensor, outputs: torch.Tensor):
