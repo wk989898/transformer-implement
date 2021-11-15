@@ -27,7 +27,7 @@ def setup_seed(seed):
 
 def batch_iterator(dataset):
     for i in range(len(dataset)):
-        yield dataset[i]["cs"]
+        yield dataset[i]["zh"]
         yield dataset[i]["en"]
 
 
@@ -36,9 +36,9 @@ def preprocess(dataset, file='tokenizer.json', prefix='', tokenizer=None):
         tokenizer = loadTokenzier(dataset, file, prefix=prefix)
 
     def reduce_fn(res, x):
-        cs, en = tokenizer.encode(x['cs']), tokenizer.encode(x['en'])
-        if 2 < len(cs.tokens) < args.max_len and 2 < len(en.tokens) < args.max_len:
-            res.append((cs, en))
+        zh, en = tokenizer.encode(x['zh']), tokenizer.encode(x['en'])
+        if 2 < len(zh.tokens) < args.max_len and 2 < len(en.tokens) < args.max_len:
+            res.append((zh, en))
         return res
     dataset = reduce(reduce_fn, dataset, [])
 
@@ -81,20 +81,20 @@ def update_lr(optimizer, args):
 
 
 def collate_fn(batch):
-    cs_batch, en_batch = [], []
-    for cs, en in batch:
-        cs.pad(args.max_len, pad_id=0)
+    zh_batch, en_batch = [], []
+    for zh, en in batch:
+        zh.pad(args.max_len, pad_id=0)
         en.pad(args.max_len, pad_id=0)
-        cs_batch.append(cs.ids)
+        zh_batch.append(zh.ids)
         en_batch.append(en.ids)
-    return cs_batch, en_batch
+    return zh_batch, en_batch
 
 
 def main(args):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
     dataset = load_dataset(
-        'wmt16', 'cs-en', split='train').to_dict()['translation']
+        'opus100', 'en-zh', split='train').to_dict()['translation']
     train_data, tokenizer = preprocess(dataset)
     args.vocab_dim = tokenizer.get_vocab_size()
     args.pad_idx = 0
@@ -123,11 +123,11 @@ def main(args):
         total_loss = 0
         total_acc = 0
         total_n = 0
-        for cs, en in train_data:
-            cs, en = torch.tensor(cs).to(device), torch.tensor(en).to(device)
+        for zh, en in train_data:
+            zh, en = torch.tensor(zh).to(device), torch.tensor(en).to(device)
             label = en[..., 1:].clone()
             en = en[..., :-1]
-            pred = model(cs, en)
+            pred = model(zh, en)
             loss, acc = compute_loss(
                 pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim)
             loss.backward()
@@ -146,18 +146,18 @@ def main(args):
         writer.add_scalar('lr', lr)
 
     validation = load_dataset(
-        'wmt16', 'cs-en', split="validation").to_dict()['translation']
+        'opus100', 'en-zh', split="validation").to_dict()['translation']
     validation_data, _ = preprocess(
         validation, prefix='validation-', tokenizer=tokenizer)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
                                  num_workers=8, shuffle=True, collate_fn=collate_fn)
     model.eval()
     with torch.no_grad():
-        for cs, en in validation_data:
-            cs, en = torch.tensor(cs).to(device), torch.tensor(en).to(device)
+        for zh, en in validation_data:
+            zh, en = torch.tensor(zh).to(device), torch.tensor(en).to(device)
             label = en[..., 1:].clone()
             en = en[..., :-1]
-            pred = model(cs, en)
+            pred = model(zh, en)
             non_pad_mask = label.ne(0)
             p = torch.argmax(pred, dim=-1)
             gt = label
