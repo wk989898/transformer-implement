@@ -126,9 +126,9 @@ class FeedForward(nn.Module):
 
     def forward(self, x):
         residual=x
-        x = self.fc2(F.relu(self.fc1(self.norm(x))))
+        x = self.fc2(F.relu(self.fc1(x)))
         x += residual
-        return x
+        return self.norm(x)
 
 
 class PositionalEncoding(nn.Module):
