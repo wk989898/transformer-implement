@@ -125,9 +125,10 @@ class FeedForward(nn.Module):
         self.norm = nn.LayerNorm(dim)
 
     def forward(self, x):
-        out = self.fc2(F.relu(self.fc1(x)))
-        out += x
-        return self.norm(out)
+        residual=x
+        x = self.fc2(F.relu(self.fc1(self.norm(x))))
+        x += residual
+        return x
 
 
 class PositionalEncoding(nn.Module):
