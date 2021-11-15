@@ -92,7 +92,9 @@ def collate_fn(batch):
 
 def main(args):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
+    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
+            [str(i) for i in args.gpu_list])
+            
     dataset = load_dataset(
         'wmt16', 'cs-en', split='train').to_dict()['translation']
     train_data, tokenizer = preprocess(dataset)
@@ -111,10 +113,8 @@ def main(args):
 
     device = 'cpu'
     if torch.cuda.is_available() and args.gpu_list:
-        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
-            [i for i in args.gpu_list])
         model = torch.nn.DataParallel(model).cuda()
-        device = torch.device('cuda:'+args.gpu_list[0])
+        device = args.gpu_list[0]
     print(f'args:{args}')
     writer = SummaryWriter(args.log_dir)
     args.step = 0
@@ -181,7 +181,7 @@ if __name__ == '__main__':
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
 
-    parse.add_argument('-g', '--gpu_list', nargs='+', type=str)
+    parse.add_argument('-g', '--gpu_list', nargs='+', type=int)
     parse.add_argument('--seed', type=int,help='random seed')
     parse.add_argument('--log_dir', type=str,
                        default='log', help='specify path to save log')
