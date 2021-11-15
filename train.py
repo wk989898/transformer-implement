@@ -38,7 +38,9 @@ def preprocess(dataset, file='tokenizer.json', prefix='', tokenizer=None):
     def reduce_fn(res, x):
         cs, en = tokenizer.encode(x['cs']), tokenizer.encode(x['en'])
         if 2 < len(cs.tokens) < args.max_len and 2 < len(en.tokens) < args.max_len:
-            res.append((cs, en))
+            cs.pad(args.max_len, pad_id=0)
+            en.pad(args.max_len, pad_id=0)
+            res.append((cs.ids, en.ids))
         return res
     dataset = reduce(reduce_fn, dataset, [])
 
@@ -81,80 +83,92 @@ def update_lr(optimizer, args):
 
 
 def collate_fn(batch):
-    cs_batch, en_batch = [], []
-    for cs, en in batch:
-        cs.pad(args.max_len, pad_id=0)
-        en.pad(args.max_len, pad_id=0)
-        cs_batch.append(cs.ids)
-        en_batch.append(en.ids)
-    return cs_batch, en_batch
+    cs, en = torch.tensor(batch).cuda().chunk(2, dim=1)
+    return cs.squeeze(), en.squeeze()
 
 
 def main(args):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
-            [str(i) for i in args.gpu_list])
-            
+        [str(i) for i in args.gpu_list])
+
     dataset = load_dataset(
         'wmt16', 'cs-en', split='train').to_dict()['translation']
     train_data, tokenizer = preprocess(dataset)
-    args.vocab_dim = tokenizer.get_vocab_size()
-    args.pad_idx = 0
-    args.samples=len(train_data)
-
     train_data = DataLoader(train_data, batch_size=args.batch_size,
-                            num_workers=8, shuffle=True, collate_fn=collate_fn)
-
-    model = Transformer(args.vocab_dim, args.dim,
-                        args.atten_dim, pad_idx=args.pad_idx, recycle=7)
-
-    optimizer = torch.optim.Adam(
-        model.parameters(), betas=[0.9, 0.98], eps=1e-9)
-
-    device = 'cpu'
-    if torch.cuda.is_available() and args.gpu_list:
-        model = torch.nn.DataParallel(model).cuda()
-        device = args.gpu_list[0]
-    print(f'args:{args}')
-    writer = SummaryWriter(args.log_dir)
-    args.step = 0
-    model.train()
-    for iter in range(args.epochs):
-        total_loss = 0
-        total_acc = 0
-        total_n = 0
-        for cs, en in train_data:
-            cs, en = torch.tensor(cs).to(device), torch.tensor(en).to(device)
-            label = en[..., 1:].clone()
-            en = en[..., :-1]
-            pred = model(cs, en)
-            loss, acc = compute_loss(
-                pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-            update_lr(optimizer, args)
-
-            total_loss += loss.item()
-            total_acc += acc.item()
-            total_n += label.ne(args.pad_idx).sum().item()
-        lr = optimizer.param_groups[0]['lr']
-        print(
-            f'iter:{iter} loss:{total_loss/total_n} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
-        writer.add_scalar('loss', total_loss/total_n)
-        writer.add_scalar('acc', total_acc/total_n)
-        writer.add_scalar('lr', lr)
+                            num_workers=0, shuffle=True, collate_fn=collate_fn)
 
     validation = load_dataset(
         'wmt16', 'cs-en', split="validation").to_dict()['translation']
     validation_data, _ = preprocess(
         validation, prefix='validation-', tokenizer=tokenizer)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
-                                 num_workers=8, shuffle=True, collate_fn=collate_fn)
+                                 num_workers=0, shuffle=True, collate_fn=collate_fn)
+
+    args.vocab_dim = tokenizer.get_vocab_size()
+    args.pad_idx = 0
+    args.samples = len(train_data)
+    args.step = 0
+
+    model = Transformer(args.vocab_dim, args.dim,
+                        args.atten_dim, pad_idx=args.pad_idx, recycle=6)
+
+    optimizer = torch.optim.Adam(
+        model.parameters(), betas=[0.9, 0.98], eps=1e-9)
+
+    if len(args.gpu_list) > 1:
+        model = torch.nn.DataParallel(model).cuda()
+    print(f'args:{args}')
+    writer = SummaryWriter(args.log_dir)
+    for iter in range(args.epochs):
+        total_loss, total_acc, total_n = 0, 0, 0
+        model.train()
+        for cs, en in train_data:
+            label = en[..., 1:].clone()
+            en = en[..., :-1]
+            pred = model(cs, en)
+            loss, acc = compute_loss(
+                pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim)
+            loss.backward()
+            update_lr(optimizer, args)
+            optimizer.step()
+            optimizer.zero_grad()
+
+            total_loss += loss.item()
+            total_acc += acc.item()
+            total_n += label.ne(args.pad_idx).sum().item()
+        lr = optimizer.param_groups[0]['lr']
+        print(
+            f'train  iter:{iter} loss:{total_loss/total_n} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
+        writer.add_scalar('loss', total_loss/total_n)
+        writer.add_scalar('acc', total_acc/total_n)
+        writer.add_scalar('lr', lr)
+
+        total_loss, total_acc, total_n = 0, 0, 0
+        model.eval()
+        with torch.no_grad():
+            for cs, en in validation_data:
+                label = en[..., 1:].clone()
+                en = en[..., :-1]
+                pred = model(cs, en)
+                loss, acc = compute_loss(
+                    pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim)
+                total_loss += loss.item()
+                total_acc += acc.item()
+                total_n += label.ne(args.pad_idx).sum().item()
+        print(
+            f'validation iter:{iter} loss:{total_loss/total_n} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
+
+    test = load_dataset(
+        'wmt16', 'cs-en', split="test").to_dict()['translation']
+    test_data, _ = preprocess(
+        test, prefix='test-', tokenizer=tokenizer)
+    test_data = DataLoader(test_data, batch_size=args.batch_size,
+                           num_workers=0, shuffle=True, collate_fn=collate_fn)
     model.eval()
     with torch.no_grad():
-        for cs, en in validation_data:
-            cs, en = torch.tensor(cs).to(device), torch.tensor(en).to(device)
+        total_n, total_acc = 0, 0
+        for cs, en in test_data:
             label = en[..., 1:].clone()
             en = en[..., :-1]
             pred = model(cs, en)
@@ -166,7 +180,7 @@ def main(args):
 
             total_n += non_pad_mask.sum().item()
             total_acc += acc.item()
-    print(f'acc:{total_acc/total_n:.2f}')
+        print(f'acc:{total_acc/total_n:.2f}')
 
     writer.close()
     torch.save(model.state_dict(), args.save_path)
@@ -177,12 +191,12 @@ if __name__ == '__main__':
     parse.add_argument('--epochs', type=int, default=100)
     parse.add_argument('--batch_size', type=int, default=256)
     parse.add_argument('--max_len', type=int, default=30)
-    parse.add_argument('--warm_step', type=int, default=4000)
+    parse.add_argument('--warm_step', type=int, default=200000)
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
 
     parse.add_argument('-g', '--gpu_list', nargs='+', type=int)
-    parse.add_argument('--seed', type=int,help='random seed')
+    parse.add_argument('--seed', type=int, help='random seed')
     parse.add_argument('--log_dir', type=str,
                        default='log', help='specify path to save log')
     parse.add_argument('--save_path', type=str,

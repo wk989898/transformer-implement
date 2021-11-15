@@ -66,10 +66,9 @@ class Transformer(nn.Module):
 
 
 class Attention(nn.Module):
-    def __init__(self, dim, pad_idx):
+    def __init__(self, dim):
         super().__init__()
         self.tem = dim**0.5
-        self.pad_idx = pad_idx
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask=None):
         '''
@@ -80,16 +79,16 @@ class Attention(nn.Module):
         if mask is not None:
             mask = rearrange(mask, 'm l1 l2-> m () l1 l2')
             assert mask.shape[-1] == attn.shape[-1], f'masked_fill same size mask:{mask.shape} attention:{attn.shape}'
-            attn.masked_fill_(mask == self.pad_idx, -1e9)
+            attn.masked_fill_(mask == False, -1e9)
         attn = torch.softmax(attn, -1)
         return torch.matmul(attn, v)
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, dim, atten_dim, pad_idx=0, head=8):
+    def __init__(self, dim, atten_dim, head=8):
         super().__init__()
         self.head = head
-        self.atten = Attention(atten_dim, pad_idx)
+        self.atten = Attention(atten_dim)
         self.q_trans = nn.Linear(dim, head*atten_dim)
         self.k_trans = nn.Linear(dim, head*atten_dim)
         self.v_trans = nn.Linear(dim, head*atten_dim)
@@ -149,7 +148,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('PE', PE)
 
     def forward(self, x):
-        return self.PE[:, :x.size(1)].clone().detach()
+        return self.PE[:, :x.size(1)]
 
 
 class Encoder(nn.Module):
@@ -158,17 +157,17 @@ class Encoder(nn.Module):
         self.embed = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
         if share_weight is not None:
             self.embed.weight = share_weight
-        self.MHA = MultiHeadAttention(dim, atten_dim, pad_idx=pad_idx)
+        self.MHA = MultiHeadAttention(dim, atten_dim)
         self.PE = PositionalEncoding(dim)
         self.ff = FeedForward(dim)
         self.recycle = recycle
 
-    def forward(self, words: torch.LongTensor, mask=None):
+    def forward(self, words: torch.LongTensor, input_mask):
         encode = self.embed(words)
         encode += self.PE(encode)
         # recycle n times
-        for _ in range(self.recycle):
-            encode = self.MHA(encode, encode, encode, mask)  # self-attention
+        for _ in range(self.recycle+1):
+            encode = self.MHA(encode, encode, encode, input_mask)
             encode = self.ff(encode)
 
         return encode
@@ -181,17 +180,17 @@ class Decoder(nn.Module):
         self.embed = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
         if share_weight is not None:
             self.embed.weight = share_weight
-        self.MHA = MultiHeadAttention(dim, atten_dim, pad_idx=pad_idx)
+        self.MHA = MultiHeadAttention(dim, atten_dim)
         self.PE = PositionalEncoding(dim)
         self.ff = FeedForward(dim)
         self.recycle = recycle
 
-    def forward(self, encode, words: torch.LongTensor, input_mask, mask=None):
+    def forward(self, encode, words: torch.LongTensor, input_mask, output_mask=None):
         decode = self.embed(words)
         decode += self.PE(decode)
         # recycle n times
-        for _ in range(self.recycle):
-            decode = self.MHA(decode, decode, decode, mask)  # self-attention
+        for _ in range(self.recycle+1):
+            decode = self.MHA(decode, decode, decode, output_mask)
             decode = self.MHA(decode, encode, encode, input_mask)
             decode = self.ff(decode)
 
