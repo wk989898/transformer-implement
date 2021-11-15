@@ -34,8 +34,9 @@ def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=F
 class Transformer(nn.Module):
     def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, recycle=1):
         super().__init__()
+        # In the embedding layers, we multiply those weights by sqrt(dim,0.5)
         self.share_weight = nn.Parameter(
-            nn.init.xavier_uniform_(torch.zeros(vocab_dim, dim)))
+            nn.init.xavier_uniform_(torch.zeros(vocab_dim, dim))*(dim**0.5))
         self.encoder = Encoder(vocab_dim, dim, atten_dim,
                                pad_idx=pad_idx, recycle=recycle, share_weight=self.share_weight)
         self.decoder = Decoder(vocab_dim, dim, atten_dim,
@@ -44,6 +45,7 @@ class Transformer(nn.Module):
         self.fc.weight = self.share_weight
 
         self.pad_idx = pad_idx
+        self.dim=dim
 
     def generate_mask(self, inputs, outputs):
         out_len = outputs.shape[-1]
@@ -57,7 +59,8 @@ class Transformer(nn.Module):
 
         encode = self.encoder(inputs, input_mask)
         decode = self.decoder(encode, outputs, input_mask, output_mask)
-
+        # Recover multiply weights by sqrt(dim,0.5)
+        decode*=self.dim**(-0.5)
         out = torch.softmax(self.fc(decode), dim=-1)
         return out
 

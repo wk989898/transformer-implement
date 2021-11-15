@@ -98,6 +98,7 @@ def main(args):
     train_data, tokenizer = preprocess(dataset)
     args.vocab_dim = tokenizer.get_vocab_size()
     args.pad_idx = 0
+    args.samples=len(train_data)
 
     train_data = DataLoader(train_data, batch_size=args.batch_size,
                             num_workers=8, shuffle=True, collate_fn=collate_fn)
@@ -110,7 +111,7 @@ def main(args):
 
     device = 'cpu'
     if torch.cuda.is_available() and args.gpu_list:
-        os.environ['CUDA_VISIBLE_DEVICES'] = ''.join(
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
             [i for i in args.gpu_list])
         model = torch.nn.DataParallel(model).cuda()
         device = torch.device('cuda:'+args.gpu_list[0])
@@ -140,9 +141,9 @@ def main(args):
         lr = optimizer.param_groups[0]['lr']
         print(
             f'iter:{iter} loss:{total_loss/total_n} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
-        writer.add_scalar('loss', total_loss/total_n, global_step=args.epochs)
-        writer.add_scalar('acc', total_acc/total_n, global_step=args.epochs)
-        writer.add_scalar('lr', lr, global_step=args.epochs)
+        writer.add_scalar('loss', total_loss/total_n)
+        writer.add_scalar('acc', total_acc/total_n)
+        writer.add_scalar('lr', lr)
 
     validation = load_dataset(
         'wmt16', 'cs-en', split="validation").to_dict()['translation']
@@ -173,15 +174,15 @@ def main(args):
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
-    parse.add_argument('--epochs', type=int, default=1000)
-    parse.add_argument('--batch_size', type=int, default=512)
+    parse.add_argument('--epochs', type=int, default=100)
+    parse.add_argument('--batch_size', type=int, default=256)
     parse.add_argument('--max_len', type=int, default=30)
     parse.add_argument('--warm_step', type=int, default=4000)
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
 
     parse.add_argument('-g', '--gpu_list', nargs='+', type=str)
-    parse.add_argument('--seed', type=int)
+    parse.add_argument('--seed', type=int,help='random seed')
     parse.add_argument('--log_dir', type=str,
                        default='log', help='specify path to save log')
     parse.add_argument('--save_path', type=str,
