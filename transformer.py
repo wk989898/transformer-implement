@@ -4,8 +4,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 
-def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=False, vocab_dim=10000):
-    pred = pred.contiguous()
+def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=False, vocab_dim=30000):
     non_pad_mask = label.ne(pad_idx)
 
     p = torch.argmax(pred, dim=-1)
@@ -22,6 +21,8 @@ def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=F
         loss = -(label * log_prb).sum(dim=-1)
         loss = loss.masked_select(non_pad_mask).sum()
     else:
+        pred = pred.contiguous()
+        label=label.contiguous()
         pred = pred.view(-1, pred.size(-1))
         label = label.view(-1)
         # Specifies a target value that is ignored and does not contribute to the input gradient.
@@ -79,7 +80,7 @@ class Attention(nn.Module):
         if mask is not None:
             mask = rearrange(mask, 'm l1 l2-> m () l1 l2')
             assert mask.shape[-1] == attn.shape[-1], f'masked_fill same size mask:{mask.shape} attention:{attn.shape}'
-            attn.masked_fill_(mask == False, -1e9)
+            attn.masked_fill_(mask == False, -float('inf'))
         attn = torch.softmax(attn, -1)
         return torch.matmul(attn, v)
 
@@ -134,7 +135,7 @@ class FeedForward(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, dim, pos_len=100):
+    def __init__(self, dim, pos_len=30):
         super().__init__()
 
         def positional(pos, i):

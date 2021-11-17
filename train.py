@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader, Dataset
 from transformer import Transformer, compute_loss
 from datasets import load_dataset
 import os
+import math
 from tqdm import tqdm
 import argparse
 import random
@@ -31,9 +32,9 @@ def batch_iterator(dataset):
         yield dataset[i]["en"]
 
 
-def preprocess(dataset, file='tokenizer.json', prefix='', tokenizer=None):
+def preprocess(dataset, file='tokenizer.json',  tokenizer=None):
     if tokenizer is None:
-        tokenizer = loadTokenzier(dataset, file, prefix=prefix)
+        tokenizer = loadTokenzier(dataset, file)
 
     def reduce_fn(res, x):
         cs, en = tokenizer.encode(x['cs']), tokenizer.encode(x['en'])
@@ -47,29 +48,30 @@ def preprocess(dataset, file='tokenizer.json', prefix='', tokenizer=None):
     return dataset, tokenizer
 
 
-def loadTokenzier(dataset, file='tokenizer.json', prefix=''):
-    if not os.path.exists(prefix+file):
+def loadTokenzier(dataset, file='tokenizer.json'):
+    if not os.path.exists(file):
         print('train Tokenzier')
-        tokenizer = Tokenizer(BPE(unk_token="[UNK]"))
+        tokenizer = Tokenizer(BPE(unk_token="<UNK>"))
         tokenizer.enable_padding()
         tokenizer.normalizer = normalizers.Sequence(
             [NFD(), Lowercase(), StripAccents()])
         tokenizer.pre_tokenizer = Whitespace()
-        # tokenizer.post_processor = TemplateProcessing(
-        #     single="[CLS] $A [SEP]",
-        #     pair="[CLS] $A [SEP] $B:1 [SEP]:1",
-        #     special_tokens=[
-        #         ("[CLS]", tokenizer.token_to_id("[CLS]")),
-        #         ("[SEP]", tokenizer.token_to_id("[SEP]")),
-        #     ],
-        # )
+        tokenizer.post_processor = TemplateProcessing(
+            single="<BOS> $A <EOS>",
+            special_tokens=[
+                ("<PAD>", 0),
+                ("<BOS>", 1),
+                ("<EOS>", 2),
+                ("<UNK>", 3),
+            ],
+        )
         trainer = BpeTrainer(
             # vocab_size=10000,
-            special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"])
+            special_tokens=["<PAD>", "<BOS>", "<EOS>","<UNK>"])
         tokenizer.train_from_iterator(batch_iterator(dataset), trainer=trainer)
-        tokenizer.save(prefix+file)
+        tokenizer.save(file)
     else:
-        tokenizer = Tokenizer.from_file(prefix+file)
+        tokenizer = Tokenizer.from_file(file)
 
     return tokenizer
 
@@ -83,7 +85,7 @@ def update_lr(optimizer, args):
 
 
 def collate_fn(batch):
-    cs, en = torch.tensor(batch).cuda().chunk(2, dim=1)
+    cs, en = torch.tensor(batch).chunk(2, dim=1)
     return cs.squeeze(), en.squeeze()
 
 
@@ -96,14 +98,14 @@ def main(args):
         'wmt16', 'cs-en', split='train').to_dict()['translation']
     train_data, tokenizer = preprocess(dataset)
     train_data = DataLoader(train_data, batch_size=args.batch_size,
-                            num_workers=0, shuffle=True, collate_fn=collate_fn)
+                            num_workers=args.num_workers, pin_memory=True, shuffle=True, collate_fn=collate_fn)
 
     validation = load_dataset(
         'wmt16', 'cs-en', split="validation").to_dict()['translation']
     validation_data, _ = preprocess(
-        validation, prefix='validation-', tokenizer=tokenizer)
+        validation,  tokenizer=tokenizer)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
-                                 num_workers=0, shuffle=True, collate_fn=collate_fn)
+                                 num_workers=args.num_workers, pin_memory=True, collate_fn=collate_fn)
 
     args.vocab_dim = tokenizer.get_vocab_size()
     args.pad_idx = 0
@@ -124,22 +126,23 @@ def main(args):
         total_loss, total_acc, total_n = 0, 0, 0
         model.train()
         for cs, en in train_data:
-            label = en[..., 1:].clone()
+            cs, en = cs.cuda(), en.cuda()
+            label = en[..., 1:]
             en = en[..., :-1]
+            optimizer.zero_grad()
             pred = model(cs, en)
             loss, acc = compute_loss(
                 pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim)
             loss.backward()
             update_lr(optimizer, args)
             optimizer.step()
-            optimizer.zero_grad()
 
             total_loss += loss.item()
             total_acc += acc.item()
             total_n += label.ne(args.pad_idx).sum().item()
         lr = optimizer.param_groups[0]['lr']
         print(
-            f'train  iter:{iter} loss:{total_loss/total_n} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
+            f'train  iter:{iter} ppl:{math.exp(total_loss/total_n)} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
         writer.add_scalar('loss', total_loss/total_n)
         writer.add_scalar('acc', total_acc/total_n)
         writer.add_scalar('lr', lr)
@@ -148,7 +151,8 @@ def main(args):
         model.eval()
         with torch.no_grad():
             for cs, en in validation_data:
-                label = en[..., 1:].clone()
+                cs, en = cs.cuda(), en.cuda()
+                label = en[..., 1:]
                 en = en[..., :-1]
                 pred = model(cs, en)
                 loss, acc = compute_loss(
@@ -157,22 +161,23 @@ def main(args):
                 total_acc += acc.item()
                 total_n += label.ne(args.pad_idx).sum().item()
         print(
-            f'validation iter:{iter} loss:{total_loss/total_n} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
+            f'validation iter:{iter} ppl:{math.exp(total_loss/total_n)} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}\n')
 
     test = load_dataset(
         'wmt16', 'cs-en', split="test").to_dict()['translation']
     test_data, _ = preprocess(
-        test, prefix='test-', tokenizer=tokenizer)
+        test, tokenizer=tokenizer)
     test_data = DataLoader(test_data, batch_size=args.batch_size,
-                           num_workers=0, shuffle=True, collate_fn=collate_fn)
+                           num_workers=args.num_workers, pin_memory=True, collate_fn=collate_fn)
     model.eval()
     with torch.no_grad():
         total_n, total_acc = 0, 0
         for cs, en in test_data:
-            label = en[..., 1:].clone()
+            cs, en = cs.cuda(), en.cuda()
+            label = en[..., 1:]
             en = en[..., :-1]
             pred = model(cs, en)
-            non_pad_mask = label.ne(0)
+            non_pad_mask = label.ne(args.pad_idx)
             p = torch.argmax(pred, dim=-1)
             gt = label
             assert p.shape == gt.shape, f'pred shape:{p.shape} and gt shape:{gt.shape}'
@@ -189,14 +194,16 @@ def main(args):
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
     parse.add_argument('--epochs', type=int, default=100)
-    parse.add_argument('--batch_size', type=int, default=256)
+    parse.add_argument('-b', '--batch_size', type=int, default=256)
     parse.add_argument('--max_len', type=int, default=30)
-    parse.add_argument('--warm_step', type=int, default=200000)
+    parse.add_argument('--warm_step', type=int, default=40000)
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
 
     parse.add_argument('-g', '--gpu_list', nargs='+', type=int)
     parse.add_argument('--seed', type=int, help='random seed')
+    parse.add_argument('--num_workers', type=int, default=0,
+                       help='DataLoader num_workers')
     parse.add_argument('--log_dir', type=str,
                        default='log', help='specify path to save log')
     parse.add_argument('--save_path', type=str,
