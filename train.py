@@ -111,13 +111,13 @@ def main(args):
     args.samples = len(train_data)
 
     model = Transformer(args.vocab_dim, args.dim,
-                        args.atten_dim, pad_idx=args.pad_idx, recycle=6)
+                        args.atten_dim, pad_idx=args.pad_idx, recycle=6).cuda()
 
     optimizer = torch.optim.Adam(
         model.parameters(), betas=[0.9, 0.98], eps=1e-9)
 
     if len(args.gpu_list)>1:
-        model = torch.nn.DataParallel(model).cuda()
+        model = torch.nn.DataParallel(model)
     print(f'args:{args}')
     writer = SummaryWriter(args.log_dir)
     train_data = DataLoader(train_data, batch_size=args.batch_size,
