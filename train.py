@@ -113,13 +113,13 @@ def main(args):
     args.step = 0
 
     model = Transformer(args.vocab_dim, args.dim,
-                        args.atten_dim, pad_idx=args.pad_idx, recycle=6)
+                        args.atten_dim, pad_idx=args.pad_idx, recycle=6).cuda()
 
     optimizer = torch.optim.Adam(
         model.parameters(), betas=[0.9, 0.98], eps=1e-9)
 
     if len(args.gpu_list) > 1:
-        model = torch.nn.DataParallel(model).cuda()
+        model = torch.nn.DataParallel(model)
     print(f'args:{args}')
     writer = SummaryWriter(args.log_dir)
     for iter in range(args.epochs):
@@ -193,7 +193,7 @@ def main(args):
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
-    parse.add_argument('--epochs', type=int, default=100)
+    parse.add_argument('--epochs', type=int, default=200)
     parse.add_argument('-b', '--batch_size', type=int, default=256)
     parse.add_argument('--max_len', type=int, default=30)
     parse.add_argument('--warm_step', type=int, default=40000)
