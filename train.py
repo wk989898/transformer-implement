@@ -67,7 +67,7 @@ def loadTokenzier(dataset, file='tokenizer.json'):
         )
         trainer = BpeTrainer(
             # vocab_size=10000,
-            special_tokens=["<PAD>", "<BOS>", "<EOS>","<UNK>"])
+            special_tokens=["<PAD>", "<BOS>", "<EOS>", "<UNK>"])
         tokenizer.train_from_iterator(batch_iterator(dataset), trainer=trainer)
         tokenizer.save(file)
     else:
@@ -112,8 +112,8 @@ def main(args):
     args.samples = len(train_data)
     args.step = 0
 
-    model = Transformer(args.vocab_dim, args.dim,
-                        args.atten_dim, pad_idx=args.pad_idx, recycle=6).cuda()
+    model = Transformer(args.vocab_dim, args.dim, args.atten_dim,
+                        pad_idx=args.pad_idx, pos_len=args.max_len, recycle=6).cuda()
 
     optimizer = torch.optim.Adam(
         model.parameters(), betas=[0.9, 0.98], eps=1e-9)
@@ -193,10 +193,10 @@ def main(args):
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
-    parse.add_argument('--epochs', type=int, default=200)
+    parse.add_argument('--epochs', type=int, default=100)
     parse.add_argument('-b', '--batch_size', type=int, default=256)
     parse.add_argument('--max_len', type=int, default=30)
-    parse.add_argument('--warm_step', type=int, default=40000)
+    parse.add_argument('--warm_step', type=int, default=4000)
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
 
