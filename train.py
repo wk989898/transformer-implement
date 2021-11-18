@@ -130,7 +130,7 @@ def main(args):
     for iter in range(args.epochs):
         total_loss, total_acc, total_n = 0, 0, 0
         model.train()
-        for cs, en in tqdm(train_data):
+        for cs, en in train_data:
             cs, en = cs.cuda(), en.cuda()
             label = en[..., 1:]
             en = en[..., :-1]
