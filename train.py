@@ -7,6 +7,7 @@ import math
 from tqdm import tqdm
 import argparse
 import random
+import numpy as np
 from functools import reduce
 from torch.utils.tensorboard import SummaryWriter
 
@@ -32,9 +33,17 @@ def batch_iterator(dataset):
         yield dataset[i]["en"]
 
 
-def preprocess(dataset, file='tokenizer.json',  tokenizer=None):
+def preprocess(name, tokenizer=None, file='tokenizer.json'):
+    data_path = f'dataset_{name}_{args.max_len}.npy'
+    if os.path.exists(file) and os.path.exists(data_path):
+        print(f'{data_path} exists')
+        return np.load(data_path), Tokenizer.from_file(file) if tokenizer is None else tokenizer
+
+    dataset = load_dataset(
+        'wmt16', 'cs-en', split=name).to_dict()['translation']
     if tokenizer is None:
-        tokenizer = loadTokenzier(dataset, file)
+        assert name == 'train','tokenizer must use train_data'
+        tokenizer = loadTokenzier(dataset)
 
     def reduce_fn(res, x):
         cs, en = tokenizer.encode(x['cs']), tokenizer.encode(x['en'])
@@ -44,8 +53,8 @@ def preprocess(dataset, file='tokenizer.json',  tokenizer=None):
             res.append((cs.ids, en.ids))
         return res
     dataset = reduce(reduce_fn, dataset, [])
-
-    return dataset, tokenizer
+    np.save(data_path, dataset)
+    return (dataset, tokenizer) if tokenizer is not None else dataset
 
 
 def loadTokenzier(dataset, file='tokenizer.json'):
@@ -85,7 +94,8 @@ def update_lr(optimizer, args):
 
 
 def collate_fn(batch):
-    cs, en = torch.tensor(batch).chunk(2, dim=1)
+
+    cs, en = torch.from_numpy(np.array(batch)).chunk(2, dim=1)
     return cs.squeeze(), en.squeeze()
 
 
@@ -94,16 +104,11 @@ def main(args):
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
         [str(i) for i in args.gpu_list])
 
-    dataset = load_dataset(
-        'wmt16', 'cs-en', split='train').to_dict()['translation']
-    train_data, tokenizer = preprocess(dataset)
+    train_data, tokenizer = preprocess('train')
     train_data = DataLoader(train_data, batch_size=args.batch_size,
                             num_workers=args.num_workers, pin_memory=True, shuffle=True, collate_fn=collate_fn)
 
-    validation = load_dataset(
-        'wmt16', 'cs-en', split="validation").to_dict()['translation']
-    validation_data, _ = preprocess(
-        validation,  tokenizer=tokenizer)
+    validation_data = preprocess('validation', tokenizer=tokenizer)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
                                  num_workers=args.num_workers, pin_memory=True, collate_fn=collate_fn)
 
@@ -125,7 +130,7 @@ def main(args):
     for iter in range(args.epochs):
         total_loss, total_acc, total_n = 0, 0, 0
         model.train()
-        for cs, en in train_data:
+        for cs, en in tqdm(train_data):
             cs, en = cs.cuda(), en.cuda()
             label = en[..., 1:]
             en = en[..., :-1]
@@ -163,10 +168,7 @@ def main(args):
         print(
             f'validation iter:{iter} ppl:{math.exp(total_loss/total_n)} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}\n')
 
-    test = load_dataset(
-        'wmt16', 'cs-en', split="test").to_dict()['translation']
-    test_data, _ = preprocess(
-        test, tokenizer=tokenizer)
+    test_data = preprocess('test', tokenizer=tokenizer)
     test_data = DataLoader(test_data, batch_size=args.batch_size,
                            num_workers=args.num_workers, pin_memory=True, collate_fn=collate_fn)
     model.eval()
