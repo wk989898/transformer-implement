@@ -62,7 +62,7 @@ class Transformer(nn.Module):
         decode = self.decoder(encode, outputs, input_mask, output_mask)
         # Recover multiply weights by sqrt(dim,0.5)
         decode*=self.dim**(-0.5)
-        out = torch.softmax(self.fc(decode), dim=-1)
+        out = self.fc(decode)
         return out
 
 
