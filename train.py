@@ -102,15 +102,15 @@ def collate_fn(batch):
 def main(args):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
-        [str(i) for i in args.gpu_list])
+        [i for i in args.gpu_list])
 
     train_data, tokenizer = preprocess('train')
     train_data = DataLoader(train_data, batch_size=args.batch_size,
-                            num_workers=args.num_workers, pin_memory=True, shuffle=True, collate_fn=collate_fn)
+                            num_workers=args.num_workers, shuffle=True, collate_fn=collate_fn)
 
     validation_data, _ = preprocess('validation', tokenizer=tokenizer)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
-                                 num_workers=args.num_workers, pin_memory=True, collate_fn=collate_fn)
+                                 num_workers=args.num_workers, collate_fn=collate_fn)
 
     args.vocab_dim = tokenizer.get_vocab_size()
     args.pad_idx = 0
@@ -132,7 +132,7 @@ def main(args):
         model.train()
         for cs, en in train_data:
             cs, en = cs.cuda(), en.cuda()
-            label = en[..., 1:].clone()
+            label = en[..., 1:]
             en = en[..., :-1]
             optimizer.zero_grad()
             pred = model(cs, en)
@@ -157,7 +157,7 @@ def main(args):
         with torch.no_grad():
             for cs, en in validation_data:
                 cs, en = cs.cuda(), en.cuda()
-                label = en[..., 1:].clone()
+                label = en[..., 1:]
                 en = en[..., :-1]
                 pred = model(cs, en)
                 loss, acc = compute_loss(
@@ -178,7 +178,7 @@ def main(args):
         total_n, total_acc = 0, 0
         for cs, en in test_data:
             cs, en = cs.cuda(), en.cuda()
-            label = en[..., 1:].clone()
+            label = en[..., 1:]
             en = en[..., :-1]
             pred = model(cs, en)
             non_pad_mask = label.ne(args.pad_idx)
@@ -193,12 +193,7 @@ def main(args):
 
     writer.close()
     save_model = model.module if hasattr(model, 'module') else model
-    torch.save({
-        'vocab_dim': args.vocab_dim,
-        'dim': args.dim,
-        'atten_dim': args.atten_dim,
-        'model': save_model.state_dict()
-    }, args.save_path)
+    torch.save(save_model, args.save_path)
 
 
 if __name__ == '__main__':
@@ -210,7 +205,7 @@ if __name__ == '__main__':
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
 
-    parse.add_argument('-g', '--gpu_list', nargs='+', type=int)
+    parse.add_argument('-g', '--gpu_list', nargs='+', type=str)
     parse.add_argument('--seed', type=int, help='random seed')
     parse.add_argument('--num_workers', type=int, default=0,
                        help='DataLoader num_workers')
