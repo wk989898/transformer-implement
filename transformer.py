@@ -40,9 +40,9 @@ class Transformer(nn.Module):
         self.embed.weight.data = self.embed.weight.data*dim**0.5
         self.PE = PositionalEncoding(dim, pos_len)
 
-        self.encoder = Encoder(dim, atten_dim, embed=self.embed, PE=self.PE
+        self.encoder = Encoder(dim, atten_dim, embed=self.embed, PE=self.PE,
                                recycle=recycle)
-        self.decoder = Decoder(dim, atten_dim, embed=self.embed, PE=self.PE
+        self.decoder = Decoder(dim, atten_dim, embed=self.embed, PE=self.PE,
                                recycle=recycle)
 
         self.fc = nn.Linear(dim, vocab_dim)
