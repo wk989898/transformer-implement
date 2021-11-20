@@ -33,8 +33,8 @@ def batch_iterator(dataset):
         yield dataset[i]["en"]
 
 
-def preprocess(name, tokenizer=None, file='tokenizer.json'):
-    data_path = f'dataset_{name}_{args.max_len}.npy'
+def preprocess(name, tokenizer=None, max_len=30, file='tokenizer.json'):
+    data_path = f'dataset_{name}_{max_len}.npy'
     if os.path.exists(file) and os.path.exists(data_path):
         print(f'{data_path} exists')
         return np.load(data_path), Tokenizer.from_file(file) if tokenizer is None else tokenizer
@@ -47,14 +47,14 @@ def preprocess(name, tokenizer=None, file='tokenizer.json'):
 
     def reduce_fn(res, x):
         cs, en = tokenizer.encode(x['cs']), tokenizer.encode(x['en'])
-        if 2 < len(cs.tokens) < args.max_len and 2 < len(en.tokens) < args.max_len:
-            cs.pad(args.max_len, pad_id=0)
-            en.pad(args.max_len, pad_id=0)
+        if 2 < len(cs.tokens) < max_len and 2 < len(en.tokens) < max_len:
+            cs.pad(max_len, pad_id=0)
+            en.pad(max_len, pad_id=0)
             res.append((cs.ids, en.ids))
         return res
     dataset = reduce(reduce_fn, dataset, [])
     np.save(data_path, dataset)
-    return (dataset, tokenizer) if tokenizer is not None else dataset
+    return dataset, tokenizer
 
 
 def loadTokenzier(dataset, file='tokenizer.json'):
@@ -108,7 +108,7 @@ def main(args):
     train_data = DataLoader(train_data, batch_size=args.batch_size,
                             num_workers=args.num_workers, pin_memory=True, shuffle=True, collate_fn=collate_fn)
 
-    validation_data = preprocess('validation', tokenizer=tokenizer)
+    validation_data, _ = preprocess('validation', tokenizer=tokenizer)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
                                  num_workers=args.num_workers, pin_memory=True, collate_fn=collate_fn)
 
@@ -170,7 +170,7 @@ def main(args):
         writer.add_scalar('validation/loss', total_loss/total_n, iter)
         writer.add_scalar('validation/acc', total_acc/total_n, iter)
         writer.add_scalar('validation/lr', lr, iter)
-    test_data = preprocess('test', tokenizer=tokenizer)
+    test_data, _ = preprocess('test', tokenizer=tokenizer)
     test_data = DataLoader(test_data, batch_size=args.batch_size,
                            num_workers=args.num_workers, pin_memory=True, collate_fn=collate_fn)
     model.eval()
