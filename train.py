@@ -132,7 +132,7 @@ def main(args):
         model.train()
         for cs, en in train_data:
             cs, en = cs.cuda(), en.cuda()
-            label = en[..., 1:]
+            label = en[..., 1:].clone()
             en = en[..., :-1]
             optimizer.zero_grad()
             pred = model(cs, en)
@@ -157,7 +157,7 @@ def main(args):
         with torch.no_grad():
             for cs, en in validation_data:
                 cs, en = cs.cuda(), en.cuda()
-                label = en[..., 1:]
+                label = en[..., 1:].clone()
                 en = en[..., :-1]
                 pred = model(cs, en)
                 loss, acc = compute_loss(
@@ -178,7 +178,7 @@ def main(args):
         total_n, total_acc = 0, 0
         for cs, en in test_data:
             cs, en = cs.cuda(), en.cuda()
-            label = en[..., 1:]
+            label = en[..., 1:].clone()
             en = en[..., :-1]
             pred = model(cs, en)
             non_pad_mask = label.ne(args.pad_idx)
