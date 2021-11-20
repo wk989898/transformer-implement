@@ -42,7 +42,7 @@ def preprocess(name, tokenizer=None, file='tokenizer.json'):
     dataset = load_dataset(
         'wmt16', 'cs-en', split=name).to_dict()['translation']
     if tokenizer is None:
-        assert name == 'train','tokenizer must use train_data'
+        assert name == 'train', 'tokenizer must use train_data'
         tokenizer = loadTokenzier(dataset)
 
     def reduce_fn(res, x):
@@ -148,9 +148,9 @@ def main(args):
         lr = optimizer.param_groups[0]['lr']
         print(
             f'train  iter:{iter} ppl:{math.exp(total_loss/total_n)} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
-        writer.add_scalar('loss', total_loss/total_n)
-        writer.add_scalar('acc', total_acc/total_n)
-        writer.add_scalar('lr', lr)
+        writer.add_scalar('train/loss', total_loss/total_n, iter)
+        writer.add_scalar('train/acc', total_acc/total_n, iter)
+        writer.add_scalar('train/lr', lr, iter)
 
         total_loss, total_acc, total_n = 0, 0, 0
         model.eval()
@@ -167,7 +167,9 @@ def main(args):
                 total_n += label.ne(args.pad_idx).sum().item()
         print(
             f'validation iter:{iter} ppl:{math.exp(total_loss/total_n)} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}\n')
-
+        writer.add_scalar('validation/loss', total_loss/total_n, iter)
+        writer.add_scalar('validation/acc', total_acc/total_n, iter)
+        writer.add_scalar('validation/lr', lr, iter)
     test_data = preprocess('test', tokenizer=tokenizer)
     test_data = DataLoader(test_data, batch_size=args.batch_size,
                            num_workers=args.num_workers, pin_memory=True, collate_fn=collate_fn)
@@ -190,7 +192,13 @@ def main(args):
         print(f'acc:{total_acc/total_n:.2f}')
 
     writer.close()
-    torch.save(model.state_dict(), args.save_path)
+    save_model = model.module if hasattr(model, 'module') else model
+    torch.save({
+        'vocab_dim': args.vocab_dim,
+        'dim': args.dim,
+        'atten_dim': args.atten_dim,
+        'model': save_model.state_dict()
+    }, args.save_path)
 
 
 if __name__ == '__main__':
