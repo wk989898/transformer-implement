@@ -95,7 +95,7 @@ def collate_fn(batch):
 def main(args):
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(
-        [str(x) for x in args.gpu_list])
+        [x for x in args.gpu_list])
 
     dataset = load_dataset(
         'opus100', 'en-zh', split='train').to_dict()['translation']
@@ -145,9 +145,9 @@ def main(args):
         lr = optimizer.param_groups[0]['lr']
         print(
             f'train  iter:{iter} ppl:{math.exp(total_loss/total_n)} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
-        writer.add_scalar('loss', total_loss/total_n)
-        writer.add_scalar('acc', total_acc/total_n)
-        writer.add_scalar('lr', lr)
+        writer.add_scalar('loss', total_loss/total_n,iter)
+        writer.add_scalar('acc', total_acc/total_n,iter)
+        writer.add_scalar('lr', lr,iter)
 
         total_loss, total_acc, total_n = 0, 0, 0
         model.eval()
@@ -191,7 +191,14 @@ def main(args):
         print(f'acc:{total_acc/total_n:.2f}')
 
     writer.close()
-    torch.save(model.state_dict(), args.save_path)
+    save_model = model.module if hasattr(model, 'module') else model
+    torch.save({
+        'vocab_dim': args.vocab_dim,
+        'dim': args.dim,
+        'atten_dim': args.atten_dim,
+        'model': save_model.state_dict()
+    }, args.save_path)
+
 
 
 if __name__ == '__main__':
@@ -203,7 +210,7 @@ if __name__ == '__main__':
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
 
-    parse.add_argument('-g', '--gpu_list', nargs='+', type=int)
+    parse.add_argument('-g', '--gpu_list', nargs='+', type=str)
     parse.add_argument('--num_workers', type=int, default=0,
                        help='DataLoader num workers')
     parse.add_argument('--seed', type=int, help='random seed')
