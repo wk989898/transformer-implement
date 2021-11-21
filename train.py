@@ -172,7 +172,7 @@ def main(args):
         writer.add_scalar('validation/lr', lr, iter)
     test_data, _ = preprocess('test', tokenizer=tokenizer)
     test_data = DataLoader(test_data, batch_size=args.batch_size,
-                           num_workers=args.num_workers, pin_memory=True, collate_fn=collate_fn)
+                           num_workers=args.num_workers, collate_fn=collate_fn)
     model.eval()
     with torch.no_grad():
         total_n, total_acc = 0, 0

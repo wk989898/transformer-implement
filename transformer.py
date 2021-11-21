@@ -6,10 +6,9 @@ from einops import rearrange
 
 def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=False, vocab_dim=30000):
     non_pad_mask = label.ne(pad_idx)
-
     p = torch.argmax(pred, dim=-1)
     gt = label
-    assert p.shape == gt.shape, f'pred shape:{p.shape} and gt shape:{gt.shape}'
+    assert p.shape == gt.shape == non_pad_mask.shape, f'pred shape:{p.shape} and gt shape:{gt.shape} and non_pad_mask shape:{non_pad_mask.shape}'
     acc = p.eq(gt).masked_select(non_pad_mask).sum()
 
     if smoothing:
@@ -35,22 +34,21 @@ def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=F
 class Transformer(nn.Module):
     def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, pos_len=30, recycle=1):
         super().__init__()
-        self.embed = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
-        # In the embedding layers, we multiply those weights by sqrt(dim,0.5)
-        self.embed.weight.data = self.embed.weight.data*dim**0.5
+        self.embedding = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
         self.PE = PositionalEncoding(dim, pos_len)
 
-        self.encoder = Encoder(dim, atten_dim, embed=self.embed, PE=self.PE,
-                               recycle=recycle)
-        self.decoder = Decoder(dim, atten_dim, embed=self.embed, PE=self.PE,
-                               recycle=recycle)
-
+        self.encoder = Encoder(dim, atten_dim,recycle=recycle)
+        self.decoder = Decoder(dim, atten_dim,recycle=recycle)
         self.fc = nn.Linear(dim, vocab_dim)
+
         self.dim = dim
         self.pad_idx = pad_idx
 
-    def apply_fc_weight(self):
-        self.fc.weight.data = self.embed.weight.data * self.dim**(-0.5)
+    def embed(self,x):
+        # In the embedding layers, we multiply those weights by sqrt(dim,0.5)
+        x=self.embedding(x)*self.dim**0.5
+        x+=self.PE(x)
+        return x
 
     def generate_mask(self, inputs, outputs):
         out_len = outputs.shape[-1]
@@ -64,11 +62,9 @@ class Transformer(nn.Module):
         input_mask, output_mask, subsequent_mask = self.generate_mask(
             inputs, outputs)
 
-        encode = self.encoder(inputs, input_mask)
-        decode = self.decoder(encode, outputs, input_mask, output_mask)
+        encode = self.encoder(self.embed(inputs), input_mask)
+        decode = self.decoder(encode, self.embed(outputs), input_mask, output_mask)
 
-        # Recover multiply weights by sqrt(dim,-0.5)
-        self.apply_fc_weight()
         out = self.fc(decode)
         return out
 
@@ -160,17 +156,13 @@ class PositionalEncoding(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self,  dim, atten_dim, embed, PE, recycle=1):
+    def __init__(self,  dim, atten_dim, recycle=1):
         super().__init__()
         self.MHA = MultiHeadAttention(dim, atten_dim)
         self.ff = FeedForward(dim)
         self.recycle = recycle
-        self.embed = embed
-        self.PE = PE
 
-    def forward(self, inputs, input_mask):
-        encode = self.embed(inputs)
-        encode += self.PE(encode)
+    def forward(self, encode, input_mask):
         # recycle n times
         for _ in range(self.recycle+1):
             encode = self.MHA(encode, encode, encode, input_mask)
@@ -181,17 +173,13 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
 
-    def __init__(self,  dim, atten_dim, embed, PE, recycle=1):
+    def __init__(self,  dim, atten_dim, recycle=1):
         super().__init__()
         self.MHA = MultiHeadAttention(dim, atten_dim)
         self.ff = FeedForward(dim)
         self.recycle = recycle
-        self.embed = embed
-        self.PE = PE
 
-    def forward(self, encode, outputs, input_mask, output_mask=None):
-        decode = self.embed(outputs)
-        decode += self.PE(decode)
+    def forward(self, encode, decode, input_mask, output_mask=None):
         # recycle n times
         for _ in range(self.recycle+1):
             decode = self.MHA(decode, decode, decode, output_mask)
