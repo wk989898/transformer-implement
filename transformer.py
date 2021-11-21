@@ -40,6 +40,7 @@ class Transformer(nn.Module):
         self.encoder = Encoder(dim, atten_dim,recycle=recycle)
         self.decoder = Decoder(dim, atten_dim,recycle=recycle)
         self.fc = nn.Linear(dim, vocab_dim)
+        self.fc.weight=self.embedding.weight
 
         self.dim = dim
         self.pad_idx = pad_idx
