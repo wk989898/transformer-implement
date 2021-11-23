@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
+from einops import rearrange, repeat
 
 
 def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=False, vocab_dim=30000):
@@ -35,21 +35,16 @@ class Transformer(nn.Module):
     def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, pos_len=30, recycle=1):
         super().__init__()
         self.embedding = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
-        self.PE = PositionalEncoding(dim, pos_len)
+        self.PE = PositionalEncoding(dim, pos_len+50)
 
-        self.encoder = Encoder(dim, atten_dim,recycle=recycle)
-        self.decoder = Decoder(dim, atten_dim,recycle=recycle)
+        self.encoder = Encoder(dim, atten_dim, recycle=recycle)
+        self.decoder = Decoder(dim, atten_dim, recycle=recycle)
         self.fc = nn.Linear(dim, vocab_dim)
-        self.fc.weight=self.embedding.weight
+        self.fc.weight = self.embedding.weight
 
         self.dim = dim
         self.pad_idx = pad_idx
-
-    def embed(self,x):
-        # In the embedding layers, we multiply those weights by sqrt(dim,0.5)
-        x=self.embedding(x)*self.dim**0.5
-        x+=self.PE(x)
-        return x
+        self.pos_len = pos_len
 
     def generate_mask(self, inputs, outputs):
         out_len = outputs.shape[-1]
@@ -58,6 +53,12 @@ class Transformer(nn.Module):
             torch.tril(torch.ones((1, out_len, out_len), device=outputs.device))).bool()
         output_mask = outputs.ne(self.pad_idx).unsqueeze(-2) & subsequent_mask
         return input_mask, output_mask, subsequent_mask
+
+    def embed(self, x):
+        # multiply weights by sqrt(dim,-0.5)
+        x = self.embedding(x)*self.dim**0.5
+        x += self.PE(x)
+        return x
 
     def forward(self, inputs: torch.Tensor, outputs: torch.Tensor):
         input_mask, output_mask, subsequent_mask = self.generate_mask(
@@ -68,6 +69,45 @@ class Transformer(nn.Module):
 
         out = self.fc(decode)
         return out
+
+    def translate(self, inputs, outputs, eos_id, beam_size=4):
+        '''
+        translate one sentence
+        '''
+        alpha, champion = 0.7, 0
+        scores = torch.zeros((beam_size), device=inputs.device)
+
+        input_mask, _, _ = self.generate_mask(inputs, outputs)
+        encode = self.encoder(self.embed(inputs), input_mask)
+
+        def subsequent_mask(out_len):
+            return (torch.tril(torch.ones((1, out_len, out_len), device=outputs.device))).bool()
+        # set the maximum output length during inference to input length + 50
+        for i in range(self.pos_len+49):
+            decode = self.decoder(encode, self.embed(
+                outputs), input_mask, subsequent_mask(outputs.size(-1)))
+            pred = self.fc(decode)
+            rank = F.log_softmax(pred[:, -1], dim=-1)
+            # search topk: beam_size x vocab_size -> beam_size x beam_size
+            current_win, current_token = rank.topk(beam_size)
+            scores = scores+current_win
+            scores, winners = scores.view(-1).topk(beam_size)
+            select_token = torch.index_select(
+                current_token.view(-1), 0, winners)
+            if i == 0:
+                outputs = repeat(outputs, '() b -> beam b', beam=beam_size)
+                # encode shape is (batch_size,beam_size,hidden_size)
+                encode = repeat(encode, '() b d -> beam b d', beam=beam_size)
+            outputs = torch.cat([outputs, select_token.unsqueeze(-1)], dim=-1)
+
+            eos_mask = outputs == eos_id
+            # every beam has eos token
+            if (eos_mask.sum(-1)>0).sum().item() == beam_size:
+                eos_idx = eos_mask.float().argmax(dim=-1)
+                # no coverage penalty
+                _, champion = (scores/((5+eos_idx)/6)**alpha).max(0)
+                break
+        return outputs, outputs[champion]
 
 
 class Attention(nn.Module):
@@ -99,7 +139,6 @@ class MultiHeadAttention(nn.Module):
         self.v_trans = nn.Linear(dim, head*atten_dim)
         self.fc = nn.Linear(head*atten_dim, dim)
         self.norm = nn.LayerNorm(dim)
-
         self.drop = nn.Dropout(0.1)
 
     def forward(self, q, k, v, mask=None):
@@ -130,10 +169,12 @@ class FeedForward(nn.Module):
         self.fc1 = nn.Linear(dim, hide_dim)
         self.fc2 = nn.Linear(hide_dim, dim)
         self.norm = nn.LayerNorm(dim)
+        self.drop = nn.Dropout(0.1)
 
     def forward(self, x):
         residual = x
         x = self.fc2(F.relu(self.fc1(x)))
+        x = self.drop(x)
         x += residual
         return self.norm(x)
 

@@ -194,7 +194,7 @@ def main(args):
     writer.close()
     save_model = model.module if hasattr(model, 'module') else model
     torch.save({
-        'tokenzier':tokenizer.to_str(),
+        'tokenizer':tokenizer.to_str(),
         'model':save_model}, args.save_path)
 
 
