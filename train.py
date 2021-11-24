@@ -94,9 +94,8 @@ def update_lr(optimizer, args):
 
 
 def collate_fn(batch):
-
-    cs, en = torch.from_numpy(np.array(batch)).chunk(2, dim=1)
-    return cs.squeeze(), en.squeeze()
+    batch=torch.from_numpy(np.array(batch))
+    return batch[:,0,:], batch[:,1,:]
 
 
 def main(args):
@@ -170,6 +169,7 @@ def main(args):
         writer.add_scalar('validation/loss', total_loss/total_n, iter)
         writer.add_scalar('validation/acc', total_acc/total_n, iter)
         writer.add_scalar('validation/lr', lr, iter)
+
     test_data, _ = preprocess('test', tokenizer=tokenizer)
     test_data = DataLoader(test_data, batch_size=args.batch_size,
                            num_workers=args.num_workers, collate_fn=collate_fn)
