@@ -60,7 +60,7 @@ class Transformer(nn.Module):
         x += self.PE(x)
         return x
 
-    def forward(self, inputs: torch.Tensor, outputs: torch.Tensor):
+    def forward(self, inputs, outputs):
         input_mask, output_mask, subsequent_mask = self.generate_mask(
             inputs, outputs)
 
@@ -113,14 +113,14 @@ class Transformer(nn.Module):
 class Attention(nn.Module):
     def __init__(self, dim):
         super().__init__()
-        self.tem = dim**0.5
+        self.scale = dim**(-0.5)
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, mask=None):
+    def forward(self, q, k, v, mask=None):
         '''
         parallel
          m x n x l x d
         '''
-        attn = torch.matmul(q/self.tem, k.transpose(3, 2))
+        attn = torch.matmul(q, k.transpose(3, 2))*self.scale
         if mask is not None:
             mask = rearrange(mask, 'm l1 l2-> m () l1 l2')
             assert mask.shape[-1] == attn.shape[-1], f'masked_fill same size mask:{mask.shape} attention:{attn.shape}'
@@ -180,7 +180,7 @@ class FeedForward(nn.Module):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, dim, pos_len=30):
+    def __init__(self, dim, pos_len=100):
         super().__init__()
 
         def positional(pos, i):
