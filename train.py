@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from transformer import Transformer, compute_loss
 from datasets import load_dataset
 import os
@@ -11,6 +11,12 @@ import numpy as np
 from functools import reduce
 from torch.utils.tensorboard import SummaryWriter
 
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel
+from contextlib import ContextDecorator
+from functools import wraps
+
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
@@ -18,6 +24,25 @@ from tokenizers.trainers import BpeTrainer
 from tokenizers import normalizers
 from tokenizers.normalizers import Lowercase, NFD, StripAccents
 from tokenizers.processors import TemplateProcessing
+
+
+class Distributed(ContextDecorator):
+    def __call__(self, fn):
+        @wraps(fn)
+        def wrapper(rank, args, tokenizer):
+            self.rank, self.args = rank, args
+            with self:
+                return fn(rank, args, tokenizer)
+        return wrapper
+
+    def __enter__(self):
+        rank, args = self.rank, self.args
+        dist.init_process_group(
+            backend='nccl', init_method=args.init_method, world_size=len(args.gpu_list), rank=rank)
+        torch.cuda.set_device(rank)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        dist.destroy_process_group()
 
 
 def setup_seed(seed):
@@ -29,21 +54,18 @@ def setup_seed(seed):
 
 def batch_iterator(dataset):
     for i in range(len(dataset)):
-        yield dataset[i]["cs"]
-        yield dataset[i]["en"]
+        for key in dataset[i]:
+            yield dataset[i][key]
 
 
-def preprocess(name, tokenizer=None, max_len=30, file='tokenizer.json'):
+def preprocess(name, tokenizer, max_len=30):
     data_path = f'dataset_{name}_{max_len}.npy'
-    if os.path.exists(file) and os.path.exists(data_path):
+    if os.path.exists(data_path):
         print(f'{data_path} exists')
-        return np.load(data_path), Tokenizer.from_file(file) if tokenizer is None else tokenizer
+        return np.load(data_path)
 
     dataset = load_dataset(
         'wmt16', 'cs-en', split=name).to_dict()['translation']
-    if tokenizer is None:
-        assert name == 'train', 'tokenizer must use train_data'
-        tokenizer = loadTokenzier(dataset)
 
     def reduce_fn(res, x):
         cs, en = tokenizer.encode(x['cs']), tokenizer.encode(x['en'])
@@ -54,10 +76,10 @@ def preprocess(name, tokenizer=None, max_len=30, file='tokenizer.json'):
         return res
     dataset = reduce(reduce_fn, dataset, [])
     np.save(data_path, dataset)
-    return dataset, tokenizer
+    return dataset
 
 
-def loadTokenzier(dataset, file='tokenizer.json'):
+def loadTokenzier(file='tokenizer.json'):
     if not os.path.exists(file):
         print('train Tokenzier')
         tokenizer = Tokenizer(BPE(unk_token="<UNK>"))
@@ -77,11 +99,12 @@ def loadTokenzier(dataset, file='tokenizer.json'):
         trainer = BpeTrainer(
             # vocab_size=10000,
             special_tokens=["<PAD>", "<BOS>", "<EOS>", "<UNK>"])
+        dataset = load_dataset(
+            'wmt16', 'cs-en', split='train').to_dict()['translation']
         tokenizer.train_from_iterator(batch_iterator(dataset), trainer=trainer)
         tokenizer.save(file)
     else:
         tokenizer = Tokenizer.from_file(file)
-
     return tokenizer
 
 
@@ -94,24 +117,20 @@ def update_lr(optimizer, args):
 
 
 def collate_fn(batch):
-    batch=torch.from_numpy(np.array(batch))
-    return batch[:,0,:], batch[:,1,:]
+    batch = torch.from_numpy(np.array(batch))
+    return batch[:, 0, :], batch[:, 1, :]
 
 
-def main(args):
-    os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
-        [i for i in args.gpu_list])
-
-    train_data, tokenizer = preprocess('train')
+@Distributed()
+def main(rank, args, tokenizer):
+    train_data = preprocess('train', tokenizer=tokenizer)
     train_data = DataLoader(train_data, batch_size=args.batch_size,
                             num_workers=args.num_workers, shuffle=True, collate_fn=collate_fn)
 
-    validation_data, _ = preprocess('validation', tokenizer=tokenizer)
+    validation_data = preprocess('validation', tokenizer=tokenizer)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
                                  num_workers=args.num_workers, collate_fn=collate_fn)
 
-    args.vocab_dim = tokenizer.get_vocab_size()
     args.pad_idx = 0
     args.samples = len(train_data)
     args.step = 0
@@ -119,11 +138,12 @@ def main(args):
     model = Transformer(args.vocab_dim, args.dim, args.atten_dim,
                         pad_idx=args.pad_idx, pos_len=args.max_len, recycle=6).cuda()
 
+    model = DistributedDataParallel(
+        model, device_ids=[rank], output_device=rank)
+
     optimizer = torch.optim.Adam(
         model.parameters(), betas=[0.9, 0.98], eps=1e-9)
 
-    if len(args.gpu_list) > 1:
-        model = torch.nn.DataParallel(model)
     print(f'args:{args}')
     writer = SummaryWriter(args.log_dir)
     for iter in range(args.epochs):
@@ -165,12 +185,12 @@ def main(args):
                 total_acc += acc.item()
                 total_n += label.ne(args.pad_idx).sum().item()
         print(
-            f'validation iter:{iter} ppl:{math.exp(total_loss/total_n)} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}\n')
+            f'validation iter:{iter} ppl:{math.exp(total_loss/total_n)} acc:{total_acc/total_n} total_words:{total_n} lr:{lr}')
         writer.add_scalar('validation/loss', total_loss/total_n, iter)
         writer.add_scalar('validation/acc', total_acc/total_n, iter)
         writer.add_scalar('validation/lr', lr, iter)
 
-    test_data, _ = preprocess('test', tokenizer=tokenizer)
+    test_data = preprocess('test', tokenizer=tokenizer)
     test_data = DataLoader(test_data, batch_size=args.batch_size,
                            num_workers=args.num_workers, collate_fn=collate_fn)
     model.eval()
@@ -189,13 +209,14 @@ def main(args):
 
             total_n += non_pad_mask.sum().item()
             total_acc += acc.item()
-        print(f'acc:{total_acc/total_n:.2f}')
+        print(f'test acc:{total_acc/total_n:.2f}')
 
     writer.close()
-    save_model = model.module if hasattr(model, 'module') else model
-    torch.save({
-        'tokenizer':tokenizer.to_str(),
-        'model':save_model}, args.save_path)
+    if rank == 0:
+        save_model = model.module if hasattr(model, 'module') else model
+        torch.save({
+            'tokenizer': tokenizer.to_str(),
+            'model': save_model}, args.save_path)
 
 
 if __name__ == '__main__':
@@ -208,6 +229,8 @@ if __name__ == '__main__':
     parse.add_argument('--atten_dim', type=int, default=64)
 
     parse.add_argument('-g', '--gpu_list', nargs='+', type=str)
+    parse.add_argument('--init_method', type=str,
+                       default='tcp://localhost:23456')
     parse.add_argument('--seed', type=int, help='random seed')
     parse.add_argument('--num_workers', type=int, default=0,
                        help='DataLoader num_workers')
@@ -220,5 +243,12 @@ if __name__ == '__main__':
     if args.seed is not None:
         setup_seed(args.seed)
 
-    main(args)
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
+        [i for i in args.gpu_list])
+
+    tokenizer = loadTokenzier()
+    args.vocab_dim = tokenizer.get_vocab_size()
+
+    mp.spawn(main, nprocs=len(args.gpu_list), args=(args, tokenizer))
     print('done')
