@@ -20,10 +20,8 @@ def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=F
         loss = -(label * log_prb).sum(dim=-1)
         loss = loss.masked_select(non_pad_mask).sum()
     else:
-        pred = pred.contiguous()
-        label = label.contiguous()
-        pred = pred.view(-1, pred.size(-1))
-        label = label.view(-1)
+        pred = pred.contiguous().view(-1, pred.size(-1))
+        label = label.contiguous().view(-1)
         # Specifies a target value that is ignored and does not contribute to the input gradient.
         loss = F.cross_entropy(
             pred, label, ignore_index=pad_idx, reduction='sum')
