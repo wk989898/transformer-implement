@@ -197,35 +197,47 @@ class PositionalEncoding(nn.Module):
         return self.PE[:, :x.size(1)]
 
 
+class EncoderLayer(nn.Module):
+    def __init__(self,dim, atten_dim,):
+        super().__init__()
+        self.MHA=MultiHeadAttention(dim, atten_dim)
+        self.ff=FeedForward(dim, atten_dim)
+
+    def forward(self,encode,input_mask):
+        encode = self.MHA(encode, encode, encode, input_mask)
+        encode = self.ff(encode)
+        return encode
+
 class Encoder(nn.Module):
     def __init__(self,  dim, atten_dim, recycle=1):
         super().__init__()
-        self.MHA = MultiHeadAttention(dim, atten_dim)
-        self.ff = FeedForward(dim)
-        self.recycle = recycle
+        self.encoder=nn.ModuleList([EncoderLayer(dim, atten_dim,) for _ in range(recycle)])
 
-    def forward(self, encode, input_mask):
-        # recycle n times
-        for _ in range(self.recycle+1):
-            encode = self.MHA(encode, encode, encode, input_mask)
-            encode = self.ff(encode)
-
+    def forward(self, encode, input_mask=None):
+        for layer in self.encoder:
+            encode=layer(encode, input_mask)
         return encode
 
+class DecoderLayer(nn.Module):
+    def __init__(self,dim, atten_dim):
+        super().__init__()
+        self.MHA1=MultiHeadAttention(dim, atten_dim)
+        self.MHA2=MultiHeadAttention(dim, atten_dim)
+        self.ff=FeedForward(dim, atten_dim)
+
+    def forward(self,encode, decode, input_mask, output_mask):
+        decode = self.MHA1(decode, decode, decode, output_mask)
+        decode = self.MHA2(decode, encode, encode, input_mask)
+        decode = self.ff(decode)
+        return decode
 
 class Decoder(nn.Module):
 
     def __init__(self,  dim, atten_dim, recycle=1):
         super().__init__()
-        self.MHA = MultiHeadAttention(dim, atten_dim)
-        self.ff = FeedForward(dim)
-        self.recycle = recycle
+        self.decoder=nn.ModuleList([DecoderLayer(dim, atten_dim) for _ in range(recycle)])
 
     def forward(self, encode, decode, input_mask, output_mask=None):
-        # recycle n times
-        for _ in range(self.recycle+1):
-            decode = self.MHA(decode, decode, decode, output_mask)
-            decode = self.MHA(decode, encode, encode, input_mask)
-            decode = self.ff(decode)
-
+        for layer in self.decoder:
+            decode = layer(encode, decode, input_mask, output_mask)
         return decode
