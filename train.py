@@ -155,7 +155,7 @@ def main(rank, args, tokenizer):
             optimizer.zero_grad()
             pred = model(src, target)
             loss, acc = compute_loss(
-                pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim)
+                pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim,smoothing=args.smoothing)
             loss.backward()
             update_lr(optimizer, args)
             optimizer.step()
@@ -179,7 +179,7 @@ def main(rank, args, tokenizer):
                 target = target[..., :-1]
                 pred = model(src, target)
                 loss, acc = compute_loss(
-                    pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim)
+                    pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim,smoothing=args.smoothing)
                 total_loss += loss.item()
                 total_acc += acc.item()
                 total_n += label.ne(args.pad_idx).sum().item()
@@ -226,6 +226,7 @@ if __name__ == '__main__':
     parse.add_argument('--warm_step', type=int, default=4000)
     parse.add_argument('--dim', type=int, default=512)
     parse.add_argument('--atten_dim', type=int, default=64)
+    parse.add_argument('--smoothing', type=float, default=0.0)
 
     parse.add_argument('-g', '--gpu_list', nargs='+', type=str)
     parse.add_argument('--init_method', type=str,
