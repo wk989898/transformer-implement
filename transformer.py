@@ -4,39 +4,39 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 
 
-def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=False, vocab_dim=30000):
+def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=0.0, vocab_dim=30000):
     non_pad_mask = label.ne(pad_idx)
     p = torch.argmax(pred, dim=-1)
     gt = label
     assert p.shape == gt.shape == non_pad_mask.shape, f'pred shape:{p.shape} and gt shape:{gt.shape} and non_pad_mask shape:{non_pad_mask.shape}'
     acc = p.eq(gt).masked_select(non_pad_mask).sum()
 
-    if smoothing:
-        label = F.one_hot(label, num_classes=vocab_dim)
-        eps = 0.1
-        label = label * (1 - eps) + (1 - label) * \
-            eps / (vocab_dim - 1)
-        log_prb = F.log_softmax(pred, dim=1)
-        loss = -(label * log_prb).sum(dim=-1)
-        loss = loss.masked_select(non_pad_mask).sum()
-    else:
-        pred = pred.contiguous().view(-1, pred.size(-1))
-        label = label.contiguous().view(-1)
-        # Specifies a target value that is ignored and does not contribute to the input gradient.
-        loss = F.cross_entropy(
-            pred, label, ignore_index=pad_idx, reduction='sum')
+    # label = F.one_hot(label, num_classes=vocab_dim)
+    # eps = 0.1
+    # label = label * (1 - eps) + (1 - label) * \
+    #     eps / (vocab_dim - 1)
+    # log_prb = F.log_softmax(pred, dim=1)
+    # loss = -(label * log_prb).sum(dim=-1)
+    # loss = loss.masked_select(non_pad_mask).sum()
+    pred = pred.contiguous().view(-1, pred.size(-1))
+    label = label.contiguous().view(-1)
+    # Specifies a target value that is ignored and does not contribute to the input gradient.
+    loss = F.cross_entropy(
+        pred, label, ignore_index=pad_idx, reduction='sum', label_smoothing=smoothing)
 
     return loss, acc
 
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, pos_len=30, recycle=1,dropout_rate=0.1):
+    def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, pos_len=30, recycle=1, dropout_rate=0.1):
         super().__init__()
         self.embedding = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
         self.PE = PositionalEncoding(dim, pos_len+50)
 
-        self.encoder = Encoder(dim, atten_dim, recycle=recycle,dropout_rate=dropout_rate)
-        self.decoder = Decoder(dim, atten_dim, recycle=recycle,dropout_rate=dropout_rate)
+        self.encoder = Encoder(
+            dim, atten_dim, recycle=recycle, dropout_rate=dropout_rate)
+        self.decoder = Decoder(
+            dim, atten_dim, recycle=recycle, dropout_rate=dropout_rate)
         self.fc = nn.Linear(dim, vocab_dim)
         self.fc.weight = self.embedding.weight
         self.drop = nn.Dropout(dropout_rate)
@@ -130,7 +130,7 @@ class Attention(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, dim, atten_dim, head=8,dropout_rate=0.1):
+    def __init__(self, dim, atten_dim, head=8, dropout_rate=0.1):
         super().__init__()
         self.head = head
         self.atten = Attention(atten_dim)
@@ -163,7 +163,7 @@ class MultiHeadAttention(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, dim=512, hide_dim=2048,dropout_rate=0.1):
+    def __init__(self, dim=512, hide_dim=2048, dropout_rate=0.1):
         super().__init__()
         self.dim = dim
         self.fc1 = nn.Linear(dim, hide_dim)
@@ -198,10 +198,11 @@ class PositionalEncoding(nn.Module):
 
 
 class EncoderLayer(nn.Module):
-    def __init__(self, dim, atten_dim,dropout_rate=0.1):
+    def __init__(self, dim, atten_dim, dropout_rate=0.1):
         super().__init__()
-        self.MHA = MultiHeadAttention(dim, atten_dim,dropout_rate=dropout_rate)
-        self.ff = FeedForward(dim, atten_dim,dropout_rate=dropout_rate)
+        self.MHA = MultiHeadAttention(
+            dim, atten_dim, dropout_rate=dropout_rate)
+        self.ff = FeedForward(dim, atten_dim, dropout_rate=dropout_rate)
 
     def forward(self, encode, input_mask):
         encode = self.MHA(encode, encode, encode, input_mask)
@@ -210,10 +211,10 @@ class EncoderLayer(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self,  dim, atten_dim, recycle=1,dropout_rate=0.1):
+    def __init__(self,  dim, atten_dim, recycle=1, dropout_rate=0.1):
         super().__init__()
         self.encoder = nn.ModuleList(
-            [EncoderLayer(dim, atten_dim,dropout_rate=dropout_rate) for _ in range(recycle)])
+            [EncoderLayer(dim, atten_dim, dropout_rate=dropout_rate) for _ in range(recycle)])
 
     def forward(self, encode, input_mask=None):
         for layer in self.encoder:
@@ -222,11 +223,13 @@ class Encoder(nn.Module):
 
 
 class DecoderLayer(nn.Module):
-    def __init__(self, dim, atten_dim,dropout_rate=0.1):
+    def __init__(self, dim, atten_dim, dropout_rate=0.1):
         super().__init__()
-        self.MHA1 = MultiHeadAttention(dim, atten_dim,dropout_rate=dropout_rate)
-        self.MHA2 = MultiHeadAttention(dim, atten_dim,dropout_rate=dropout_rate)
-        self.ff = FeedForward(dim, atten_dim,dropout_rate=dropout_rate)
+        self.MHA1 = MultiHeadAttention(
+            dim, atten_dim, dropout_rate=dropout_rate)
+        self.MHA2 = MultiHeadAttention(
+            dim, atten_dim, dropout_rate=dropout_rate)
+        self.ff = FeedForward(dim, atten_dim, dropout_rate=dropout_rate)
 
     def forward(self, encode, decode, input_mask, output_mask):
         decode = self.MHA1(decode, decode, decode, output_mask)
@@ -237,10 +240,10 @@ class DecoderLayer(nn.Module):
 
 class Decoder(nn.Module):
 
-    def __init__(self,  dim, atten_dim, recycle=1,dropout_rate=0.1):
+    def __init__(self,  dim, atten_dim, recycle=1, dropout_rate=0.1):
         super().__init__()
         self.decoder = nn.ModuleList(
-            [DecoderLayer(dim, atten_dim,dropout_rate=dropout_rate) for _ in range(recycle)])
+            [DecoderLayer(dim, atten_dim, dropout_rate=dropout_rate) for _ in range(recycle)])
 
     def forward(self, encode, decode, input_mask, output_mask=None):
         for layer in self.decoder:
