@@ -1,0 +1,27 @@
+import torch
+import os
+from tokenizers import Tokenizer
+
+
+def main(src=''):
+    model_path = 'model.pt'
+    if not os.path.exists(model_path):
+        raise FileNotFoundError('model not found')
+    state = torch.load(model_path)
+    model, tokenizer = state['model'], Tokenizer.from_str(state['tokenizer'])
+
+    model.eval()
+    with torch.no_grad():
+        src, target = tokenizer.encode(src), [tokenizer.token_to_id('<BOS>')]
+        src = torch.tensor([src.ids]).cuda()
+        target = torch.tensor([target]).cuda()
+        result, target = model.translate(
+            src, target, eos_id=tokenizer.token_to_id('<EOS>'), beam_size=4)
+
+        print(f'target: {tokenizer.decode(target.tolist())}')
+        print(f'result: {tokenizer.decode_batch(result.tolist())}')
+
+
+if __name__ == '__main__':
+    src = 'attention is all you need'
+    main(src)
