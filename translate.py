@@ -45,9 +45,7 @@ def translate(self, inputs, outputs, eos_id, beam_size=4):
                 break
         return outputs, outputs[champion]
 
-
-if __name__ == '__main__':
-    model_path = 'model.pt'
+def main(src,model_path='model.pt'):
     if not os.path.exists(model_path):
         raise ValueError('model not found')
     state = torch.load(model_path)
@@ -55,13 +53,15 @@ if __name__ == '__main__':
 
     model.eval()
     with torch.no_grad():
-        src = ''
-        src, en = tokenizer.encode(src), [tokenizer.token_to_id('<BOS>')]
-        print(f'src {src.ids} {src.tokens}')
-        src = torch.tensor([src.ids]).cuda()
-        en = torch.tensor([en]).cuda()
-        result, target = model.translate(src, en, eos_id=tokenizer.token_to_id('<EOS>'),beam_size=4)
+        src, target = tokenizer.encode(src), [tokenizer.token_to_id('<BOS>')]
+        src = torch.tensor([src.ids])
+        target = torch.tensor([target])
+        result, target = model.translate(src, target, eos_id=tokenizer.token_to_id('<EOS>'),beam_size=4)
         # result, target = translate(model, src, en, eos_id=tokenizer.token_to_id('<EOS>'),beam_size=4)
 
         print(f'target: {tokenizer.decode(target.tolist())}')
         print(f'result: {tokenizer.decode_batch(result.tolist())}')
+
+if __name__ == '__main__':
+    src='pozornost je vše, co potřebujete'
+    main(src)
