@@ -74,7 +74,7 @@ class Transformer(nn.Module):
         '''
         translate one sentence
         '''
-        alpha, champion = 0.7, 0
+        alpha, champion = 0.6, 0
         scores = torch.zeros((beam_size), device=inputs.device)
 
         input_mask, _, _ = self.generate_mask(inputs, outputs)
