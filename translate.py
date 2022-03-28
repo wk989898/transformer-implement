@@ -3,6 +3,7 @@ import torch.nn.functional as F
 from einops import repeat
 from tokenizers import Tokenizer
 import os
+from transformer import Transformer
 
 
 def translate(self, inputs, outputs, eos_id, beam_size=4):
@@ -45,17 +46,20 @@ def translate(self, inputs, outputs, eos_id, beam_size=4):
                 break
         return outputs, outputs[champion]
 
-def main(src,model_path='model.pt'):
+def main(src,model_path='model.pt',file='tokenizer.json'):
     if not os.path.exists(model_path):
         raise ValueError('model not found')
-    state = torch.load(model_path)
-    model, tokenizer = state['model'], Tokenizer.from_str(state['tokenizer'])
+    args,model_dict=torch.load(model_path)['args'],torch.load(model_path)['model']
+    model = Transformer(args.vocab_dim, args.dim, args.atten_dim,
+                        pad_idx=args.pad_idx, pos_len=args.max_len, recycle=6).cuda()
+    model.load_state_dict(model_dict)
+    tokenizer =  Tokenizer.from_file(file)
 
     model.eval()
     with torch.no_grad():
         src, target = tokenizer.encode(src), [tokenizer.token_to_id('<BOS>')]
-        src = torch.tensor([src.ids])
-        target = torch.tensor([target])
+        src = torch.tensor([src.ids]).cuda()
+        target = torch.tensor([target]).cuda()
         result, target = model.translate(src, target, eos_id=tokenizer.token_to_id('<EOS>'),beam_size=4)
         # result, target = translate(model, src, en, eos_id=tokenizer.token_to_id('<EOS>'),beam_size=4)
 

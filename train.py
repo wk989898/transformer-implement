@@ -29,10 +29,10 @@ from tokenizers.processors import TemplateProcessing
 class Distributed(ContextDecorator):
     def __call__(self, fn):
         @wraps(fn)
-        def wrapper(rank, args, tokenizer):
+        def wrapper(rank, args):
             self.rank, self.args = rank, args
             with self:
-                return fn(rank, args, tokenizer)
+                return fn(rank, args)
         return wrapper
 
     def __enter__(self):
@@ -122,12 +122,12 @@ def collate_fn(batch):
 
 
 @Distributed()
-def main(rank, args, tokenizer):
-    train_data = preprocess('train', tokenizer=tokenizer)
+def main(rank, args):
+    train_data = preprocess('train', tokenizer=args.tokenizer)
     train_data = DataLoader(train_data, batch_size=args.batch_size,
                             num_workers=args.num_workers, shuffle=True, collate_fn=collate_fn)
 
-    validation_data = preprocess('validation', tokenizer=tokenizer)
+    validation_data = preprocess('validation', tokenizer=args.tokenizer)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
                                  num_workers=args.num_workers, collate_fn=collate_fn)
 
@@ -137,7 +137,9 @@ def main(rank, args, tokenizer):
 
     model = Transformer(args.vocab_dim, args.dim, args.atten_dim,
                         pad_idx=args.pad_idx, pos_len=args.max_len, recycle=6).cuda()
-
+    if args.check_point is not None:
+        model_dict=torch.load(args.check_point)['model']
+        model.load_state_dict(model_dict)
     model = DistributedDataParallel(
         model, device_ids=[rank], output_device=rank)
 
@@ -190,7 +192,7 @@ def main(rank, args, tokenizer):
         writer.add_scalar('validation/acc', total_acc/total_n, iter)
         writer.add_scalar('validation/lr', lr, iter)
 
-    test_data = preprocess('test', tokenizer=tokenizer)
+    test_data = preprocess('test', tokenizer=args.tokenizer)
     test_data = DataLoader(test_data, batch_size=args.batch_size,
                            num_workers=args.num_workers, collate_fn=collate_fn)
     model.eval()
@@ -210,14 +212,12 @@ def main(rank, args, tokenizer):
             total_n += non_pad_mask.sum().item()
             total_acc += acc.item()
         print(f'test acc:{total_acc/total_n:.2f}')
-
     writer.close()
     if rank == 0:
-        save_model = model.module if hasattr(model, 'module') else model
+        model_dict = model.module.state_dict() if hasattr(model, 'module') else model.state_dict()
         torch.save({
-            'tokenizer': tokenizer.to_str(),
-            'model': save_model}, args.save_path)
-
+            'args': args,
+            'model': model_dict}, args.save_path)
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser()
@@ -238,6 +238,8 @@ if __name__ == '__main__':
                        help='DataLoader num_workers')
     parse.add_argument('--log_dir', type=str,
                        default='log', help='specify path to save log')
+    parse.add_argument('--check_point', type=str,
+                       default=None, help='specify check_point path')
     parse.add_argument('--save_path', type=str,
                        default='model.pt', help='specify path to save model')
     args = parse.parse_args()
@@ -249,8 +251,8 @@ if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
         [i for i in args.gpu_list])
 
-    tokenizer = loadTokenzier()
-    args.vocab_dim = tokenizer.get_vocab_size()
+    args.tokenizer = loadTokenzier()
+    args.vocab_dim = args.tokenizer.get_vocab_size()
 
-    mp.spawn(main, nprocs=len(args.gpu_list), args=(args, tokenizer))
+    mp.spawn(main, nprocs=len(args.gpu_list), args=(args,))
     print('done')
