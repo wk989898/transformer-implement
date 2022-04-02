@@ -1,6 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
-from transformer import Transformer, compute_loss
+# from transformer import Transformer, compute_loss
+from pe_transformer import Transformer, compute_loss
 from datasets import load_dataset
 import os
 import math
@@ -17,11 +18,10 @@ from torch.nn.parallel import DistributedDataParallel
 from contextlib import ContextDecorator
 from functools import wraps
 
-from tokenizers import Tokenizer
+from tokenizers import Tokenizer,normalizers
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import BpeTrainer
-from tokenizers import normalizers
 from tokenizers.normalizers import Lowercase, NFD, StripAccents
 from tokenizers.processors import TemplateProcessing
 

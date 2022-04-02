@@ -19,7 +19,7 @@ def main(src='',model_path = 'model.pt',file='tokenizer.json'):
         src = torch.tensor([src.ids]).cuda()
         target = torch.tensor([target]).cuda()
         result, target = model.translate(
-            src, target, eos_id=tokenizer.token_to_id('<EOS>'), beam_size=2)
+            src, target, eos_id=tokenizer.token_to_id('<EOS>'), beam_size=1)
 
         print(f'target: {tokenizer.decode(target.tolist())}')
         print(f'result: {tokenizer.decode_batch(result.tolist())}')
