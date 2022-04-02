@@ -4,25 +4,17 @@ import torch.nn.functional as F
 from einops import rearrange, repeat
 
 
-def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=0.0, vocab_dim=30000):
+def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=0.0):
     non_pad_mask = label.ne(pad_idx)
     p = torch.argmax(pred, dim=-1)
     gt = label
     assert p.shape == gt.shape == non_pad_mask.shape, f'pred shape:{p.shape} and gt shape:{gt.shape} and non_pad_mask shape:{non_pad_mask.shape}'
     acc = p.eq(gt).masked_select(non_pad_mask).sum()
-
-    # label = F.one_hot(label, num_classes=vocab_dim)
-    # eps = 0.1
-    # label = label * (1 - eps) + (1 - label) * \
-    #     eps / (vocab_dim - 1)
-    # log_prb = F.log_softmax(pred, dim=1)
-    # loss = -(label * log_prb).sum(dim=-1)
-    # loss = loss.masked_select(non_pad_mask).sum()
     pred = pred.contiguous().view(-1, pred.size(-1))
     label = label.contiguous().view(-1)
     # Specifies a target value that is ignored and does not contribute to the input gradient.
     loss = F.cross_entropy(
-        pred, label, ignore_index=pad_idx, reduction='sum', label_smoothing=0.1)
+        pred, label, ignore_index=pad_idx, reduction='sum', label_smoothing=smoothing)
 
     return loss, acc
 

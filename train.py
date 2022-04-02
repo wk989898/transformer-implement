@@ -157,7 +157,7 @@ def main(rank, args):
             optimizer.zero_grad()
             pred = model(src, target)
             loss, acc = compute_loss(
-                pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim,smoothing=args.smoothing)
+                pred, label, pad_idx=args.pad_idx,smoothing=args.smoothing)
             loss.backward()
             update_lr(optimizer, args)
             optimizer.step()
@@ -181,7 +181,7 @@ def main(rank, args):
                 target = target[..., :-1]
                 pred = model(src, target)
                 loss, acc = compute_loss(
-                    pred, label, pad_idx=args.pad_idx, vocab_dim=args.vocab_dim,smoothing=args.smoothing)
+                    pred, label, pad_idx=args.pad_idx,smoothing=args.smoothing)
                 total_loss += loss.item()
                 total_acc += acc.item()
                 total_n += label.ne(args.pad_idx).sum().item()
