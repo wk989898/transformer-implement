@@ -194,7 +194,7 @@ class EncoderLayer(nn.Module):
         super().__init__()
         self.MHA = MultiHeadAttention(
             dim, atten_dim, dropout_rate=dropout_rate)
-        self.ff = FeedForward(dim, atten_dim, dropout_rate=dropout_rate)
+        self.ff = FeedForward(dim, dropout_rate=dropout_rate)
 
     def forward(self, encode, input_mask):
         encode = self.MHA(encode, encode, encode, input_mask)
@@ -221,7 +221,7 @@ class DecoderLayer(nn.Module):
             dim, atten_dim, dropout_rate=dropout_rate)
         self.MHA2 = MultiHeadAttention(
             dim, atten_dim, dropout_rate=dropout_rate)
-        self.ff = FeedForward(dim, atten_dim, dropout_rate=dropout_rate)
+        self.ff = FeedForward(dim, dropout_rate=dropout_rate)
 
     def forward(self, encode, decode, input_mask, output_mask):
         decode = self.MHA1(decode, decode, decode, output_mask)
