@@ -20,7 +20,7 @@ def compute_loss(pred: torch.Tensor, label: torch.Tensor, pad_idx=0, smoothing=0
 
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, pos_len=30, recycle=1, dropout_rate=0.1):
+    def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, pos_len=100, recycle=1, dropout_rate=0.1):
         super().__init__()
         self.embedding = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
         self.PE = PositionalEncoding(dim, pos_len+50)

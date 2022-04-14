@@ -25,7 +25,7 @@ class Transformer(nn.Module):
     https://arxiv.org/abs/2006.15595
     '''
 
-    def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, pos_len=30, recycle=1, dropout_rate=0.1):
+    def __init__(self, vocab_dim, dim, atten_dim, pad_idx=0, pos_len=100, recycle=1, dropout_rate=0.1):
         super().__init__()
         self.embedding = nn.Embedding(vocab_dim, dim, padding_idx=pad_idx)
         self.PE = PositionalEncoding(dim, pos_len+50)
@@ -37,6 +37,7 @@ class Transformer(nn.Module):
         self.fc = nn.Linear(dim, vocab_dim)
         self.fc.weight = self.embedding.weight
         self.drop = nn.Dropout(dropout_rate)
+        self.norm = nn.LayerNorm(dim)
         self.dim = dim
         self.pad_idx = pad_idx
         self.pos_len = pos_len
@@ -53,7 +54,7 @@ class Transformer(nn.Module):
         # multiply weights by sqrt(dim,-0.5)
         x = self.embedding(x)*self.dim**0.5
         pe = self.PE(x)
-        x = self.drop(x)
+        x = self.norm(self.drop(x))
         return x, pe
 
     def forward(self, inputs, outputs):
