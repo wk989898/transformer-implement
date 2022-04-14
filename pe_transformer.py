@@ -163,7 +163,7 @@ class MultiHeadAttention(nn.Module):
         atten = self.fc(atten)
 
         atten = self.drop(atten)
-        atten += q
+        atten = atten+q
         atten = self.norm(atten)
         return atten
 
@@ -181,7 +181,7 @@ class FeedForward(nn.Module):
         residual = x
         x = self.fc2(F.relu(self.fc1(x)))
         x = self.drop(x)
-        x += residual
+        x = x+residual
         return self.norm(x)
 
 
