@@ -186,7 +186,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('PE', PE)
 
     def forward(self, x):
-        return self.PE[:, :x.size(1)]
+        return self.PE[:, :x.size(1)].clone()
 
 
 class EncoderLayer(nn.Module):
