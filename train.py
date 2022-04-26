@@ -1,28 +1,26 @@
-import torch
-from torch.utils.data import DataLoader
-# from transformer import Transformer, compute_loss
-from pe_transformer import Transformer, compute_loss
-from datasets import load_dataset
 import os
 import math
-from tqdm import tqdm
 import argparse
 import random
 import numpy as np
-from functools import reduce
+import torch
+# from transformer import Transformer, compute_loss
+from pe_transformer import Transformer, compute_loss
+from datasets import load_dataset
+from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel
 from contextlib import ContextDecorator
-from functools import wraps
+from functools import wraps,reduce
 
-from tokenizers import Tokenizer,normalizers
+from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import Whitespace
 from tokenizers.trainers import BpeTrainer
-from tokenizers.normalizers import Lowercase, NFD, StripAccents
+from tokenizers.normalizers import Lowercase, NFD, StripAccents, Sequence
 from tokenizers.processors import TemplateProcessing
 
 
@@ -78,12 +76,12 @@ def preprocess(name, tokenizer, max_len=30):
     return dataset
 
 
-def loadTokenzier(file='tokenizer.json'):
+def loadTokenzier(file):
     if not os.path.exists(file):
         print('train Tokenzier')
         tokenizer = Tokenizer(BPE(unk_token="<UNK>"))
         tokenizer.enable_padding()
-        tokenizer.normalizer = normalizers.Sequence(
+        tokenizer.normalizer = Sequence(
             [NFD(), Lowercase(), StripAccents()])
         tokenizer.pre_tokenizer = Whitespace()
         tokenizer.post_processor = TemplateProcessing(
@@ -122,11 +120,15 @@ def collate_fn(batch):
 
 @Distributed()
 def main(rank, args):
-    train_data = preprocess('train', tokenizer=args.tokenizer)
+    train_data = preprocess(
+        'train', tokenizer=args.tokenizer, max_len=args.max_len)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(
+        train_data)
     train_data = DataLoader(train_data, batch_size=args.batch_size,
-                            num_workers=args.num_workers, shuffle=True, collate_fn=collate_fn)
+                            num_workers=args.num_workers, sampler=train_sampler, collate_fn=collate_fn)
 
-    validation_data = preprocess('validation', tokenizer=args.tokenizer)
+    validation_data = preprocess(
+        'validation', tokenizer=args.tokenizer, max_len=args.max_len)
     validation_data = DataLoader(validation_data, batch_size=args.batch_size,
                                  num_workers=args.num_workers, collate_fn=collate_fn)
 
@@ -137,7 +139,7 @@ def main(rank, args):
     model = Transformer(args.vocab_dim, args.dim, args.atten_dim,
                         pad_idx=args.pad_idx, pos_len=args.max_len, recycle=6).cuda()
     if args.check_point is not None:
-        model_dict=torch.load(args.check_point)['model']
+        model_dict = torch.load(args.check_point)['model']
         model.load_state_dict(model_dict)
     model = DistributedDataParallel(
         model, device_ids=[rank], output_device=rank)
@@ -149,6 +151,7 @@ def main(rank, args):
     writer = SummaryWriter(args.log_dir)
     for iter in range(args.epochs):
         total_loss, total_acc, total_n = 0, 0, 0
+        train_sampler.set_epoch(iter)
         model.train()
         for src, target in train_data:
             src, target = src.cuda(), target.cuda()
@@ -157,7 +160,7 @@ def main(rank, args):
             optimizer.zero_grad()
             pred = model(src, target)
             loss, acc = compute_loss(
-                pred, label, pad_idx=args.pad_idx,smoothing=args.smoothing)
+                pred, label, pad_idx=args.pad_idx, smoothing=args.smoothing)
             loss.backward()
             update_lr(optimizer, args)
             optimizer.step()
@@ -181,7 +184,7 @@ def main(rank, args):
                 target = target[..., :-1]
                 pred = model(src, target)
                 loss, acc = compute_loss(
-                    pred, label, pad_idx=args.pad_idx,smoothing=args.smoothing)
+                    pred, label, pad_idx=args.pad_idx, smoothing=args.smoothing)
                 total_loss += loss.item()
                 total_acc += acc.item()
                 total_n += label.ne(args.pad_idx).sum().item()
@@ -191,7 +194,8 @@ def main(rank, args):
         writer.add_scalar('validation/acc', total_acc/total_n, iter)
         writer.add_scalar('validation/lr', lr, iter)
 
-    test_data = preprocess('test', tokenizer=args.tokenizer)
+    test_data = preprocess(
+        'test', tokenizer=args.tokenizer, max_len=args.max_len)
     test_data = DataLoader(test_data, batch_size=args.batch_size,
                            num_workers=args.num_workers, collate_fn=collate_fn)
     model.eval()
@@ -214,7 +218,8 @@ def main(rank, args):
 
     writer.close()
     if rank == 0:
-        model_dict = model.module.state_dict() if hasattr(model, 'module') else model.state_dict()
+        model_dict = model.module.state_dict() if hasattr(
+            model, 'module') else model.state_dict()
         torch.save({
             'args': args,
             'model': model_dict}, args.save_path)
@@ -231,6 +236,8 @@ if __name__ == '__main__':
     parse.add_argument('--smoothing', type=float, default=0.0)
 
     parse.add_argument('-g', '--gpu_list', nargs='+', type=str)
+    parse.add_argument('-file', '--tokenizer_file',
+                       type=str, default='tokenizer.json')
     parse.add_argument('--init_method', type=str,
                        default='tcp://localhost:23456')
     parse.add_argument('--seed', type=int, help='random seed')
@@ -251,7 +258,7 @@ if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(
         [i for i in args.gpu_list])
 
-    args.tokenizer = loadTokenzier()
+    args.tokenizer = loadTokenzier(args.tokenizer_file)
     args.vocab_dim = args.tokenizer.get_vocab_size()
 
     mp.spawn(main, nprocs=len(args.gpu_list), args=(args,))

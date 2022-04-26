@@ -1,17 +1,19 @@
 import torch
 import os
 from tokenizers import Tokenizer
-from transformer import Transformer
+# from transformer import Transformer
+from pe_transformer import Transformer
 
-def main(src='',model_path = 'model.pt',file='tokenizer.json'):
+
+def main(src='', model_path='model.pt', file='tokenizer.json'):
     if not os.path.exists(model_path):
         raise FileNotFoundError('model not found')
     state = torch.load(model_path)
-    model_dict,args=state['model'],state['args']
-    model=Transformer(args.vocab_dim, args.dim, args.atten_dim,
+    model_dict, args = state['model'], state['args']
+    model = Transformer(args.vocab_dim, args.dim, args.atten_dim,
                         pad_idx=args.pad_idx, pos_len=args.max_len, recycle=6).cuda()
     model.load_state_dict(model_dict)
-    tokenizer =Tokenizer.from_file(file)
+    tokenizer = Tokenizer.from_file(file)
 
     model.eval()
     with torch.no_grad():
