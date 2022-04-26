@@ -32,6 +32,7 @@ class Transformer(nn.Module):
         self.fc = nn.Linear(dim, vocab_dim)
         self.fc.weight = self.embedding.weight
         self.drop = nn.Dropout(dropout_rate)
+        self.norm = nn.LayerNorm(dim)
         self.dim = dim
         self.pad_idx = pad_idx
         self.pos_len = pos_len
@@ -48,7 +49,7 @@ class Transformer(nn.Module):
         # multiply weights by sqrt(dim,-0.5)
         x = self.embedding(x)*self.dim**0.5
         x = x+self.PE(x)
-        x = self.drop(x)
+        x = self.norm(self.drop(x))
         return x
 
     def forward(self, inputs, outputs):
